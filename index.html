@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Material Interaction Lab</title>
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<header>
+  <div class="brand"><h1>Material Interaction Lab</h1><p id="blurb"></p></div>
+  <nav id="tabs" aria-label="Experiments"></nav>
+</header>
+<main>
+  <aside id="left">
+    <section>
+      <h2>Try an example</h2>
+      <div id="presets"></div>
+    </section>
+    <section id="lanes"></section>
+    <p class="note">Values are realistic orders of magnitude tuned for a clear picture, not lab measurements.</p>
+  </aside>
+
+  <section id="stage">
+    <div id="view"><div id="fade"></div><div id="molOverlay" hidden></div></div>
+    <div id="readouts"></div>
+    <div id="controls">
+      <button id="play" type="button">▶ Run test</button>
+      <label class="slider"><span id="controlName">Tilt</span>
+        <input id="slider" type="range" min="0" max="1000" value="0">
+        <output id="controlValue">0°</output>
+      </label>
+      <label id="wetWrap" class="check" hidden><input id="wet" type="checkbox"> Wet surface</label>
+      <button id="reset" type="button">Reset</button>
+      <button id="zoom" type="button" title="Dive into the contact and watch the molecules">🔬 Zoom to molecules</button>
+    </div>
+  </section>
+
+  <aside id="right">
+    <h2>Why?</h2>
+    <div id="explain"></div>
+    <div id="molExplain" hidden></div>
+    <h3 id="chartTitle">Measurement</h3>
+    <canvas id="chart"></canvas>
+    <h3>Zoomed in on the contact</h3>
+    <canvas id="micro"></canvas>
+  </aside>
+</main>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

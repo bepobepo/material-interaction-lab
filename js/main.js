@@ -1,0 +1,221 @@
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { SUBSTANCES, SOLIDS } from './materials.js';
+import { wetInteract, solidInteract } from './pairing.js';
+import { explainHTML } from './explain.js';
+import { TiltRig } from './rigs/tilt.js';
+import { PullRig } from './rigs/pull.js';
+import { DragRig } from './rigs/drag.js';
+import { drawChart, cssVar } from './ui/chart.js';
+import { drawMicro } from './ui/microview.js';
+import { MolecularView } from './molecular/view.js';
+import { molecularHTML } from './molecular/captions.js';
+
+const RIGS = {
+  tilt: {
+    tab: 'Tilt a plate', Rig: TiltRig, aSet: SUBSTANCES, aLabel: 'Substance', bLabel: 'Plate surface', control: 'Tilt', sweep: 14,
+    blurb: 'Put a spoonful on a plate, tilt it, and see what runs and what clings.',
+    camera: [5.4, 5.2, 6.6], target: [0, 1.6, 0],
+    presets: [
+      { name: 'Yogurt vs water on a plate', lanes: [['yogurt', 'ceramic'], ['water', 'ceramic']] },
+      { name: 'Honey: ceramic vs non-stick', lanes: [['honey', 'ceramic'], ['honey', 'teflon']] },
+      { name: 'Water: glass vs non-stick', lanes: [['water', 'glass'], ['water', 'teflon']] },
+      { name: 'Ketchup vs cooking oil', lanes: [['ketchup', 'ceramic'], ['oil', 'ceramic']] },
+    ],
+  },
+  pull: {
+    tab: 'Pull apart', Rig: PullRig, aSet: SUBSTANCES, aLabel: 'Substance between', bLabel: 'Surfaces', control: 'Separation', sweep: 7,
+    blurb: 'Squash something between two surfaces, pull them apart, and see what stretches, tears or peels.',
+    camera: [1.0, 3.2, 8.6], target: [0, 1.55, 0],
+    presets: [
+      { name: 'Taffy vs gum on teeth', lanes: [['taffy', 'enamel'], ['gum', 'enamel']] },
+      { name: 'Taffy: teeth vs non-stick', lanes: [['taffy', 'enamel'], ['taffy', 'teflon']] },
+      { name: 'Honey vs water on glass', lanes: [['honey', 'glass'], ['water', 'glass']] },
+      { name: 'Gum: pavement vs steel', lanes: [['gum', 'stone'], ['gum', 'steel']] },
+    ],
+  },
+  drag: {
+    tab: 'Drag a block', Rig: DragRig, aSet: SOLIDS, aLabel: 'Block', bLabel: 'Surface', control: 'Pull handle', sweep: 6, wet: true,
+    blurb: 'Pull a block across a surface with a spring and feel how much it grips.',
+    camera: [5.6, 4.4, 7.4], target: [0.2, 0.2, 0.2],
+    presets: [
+      { name: 'Rubber vs leather on stone', lanes: [['rubber', 'stone'], ['leather', 'stone']] },
+      { name: 'Rubber: stone vs ice', lanes: [['rubber', 'stone'], ['rubber', 'ice']] },
+      { name: 'Steel on steel vs on non-stick', lanes: [['steel', 'steel'], ['steel', 'teflon']] },
+      { name: 'Rubber: glass vs stone (try wet)', lanes: [['rubber', 'glass'], ['rubber', 'stone']] },
+    ],
+  },
+};
+
+const $ = (id) => document.getElementById(id);
+const el = { view: $('view'), tabs: $('tabs'), blurb: $('blurb'), presets: $('presets'), lanes: $('lanes'), readouts: $('readouts'), play: $('play'),
+  slider: $('slider'), controlName: $('controlName'), controlValue: $('controlValue'), wetWrap: $('wetWrap'), wet: $('wet'), reset: $('reset'),
+  explain: $('explain'), chart: $('chart'), chartTitle: $('chartTitle'), micro: $('micro'), zoom: $('zoom'), fade: $('fade'), molOverlay: $('molOverlay'), molExplain: $('molExplain') };
+
+// ---- scene -----------------------------------------------------------------------------------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+el.view.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.enableDamping = true; orbit.maxPolarAngle = Math.PI * 0.49; orbit.minDistance = 2.5; orbit.maxDistance = 16;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f99, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(3.5, 8, 4.5); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -4.5, right: 4.5, top: 4.5, bottom: -4.5, near: 1, far: 20 }); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.01;
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0xbcd4ff, 0.6); fill.position.set(-4, 3, -3); scene.add(fill);
+
+const floor = new THREE.Mesh(new THREE.CircleGeometry(14, 64), new THREE.MeshStandardMaterial({ roughness: 0.95 }));
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+const world = new THREE.Group(); world.scale.setScalar(10); scene.add(world);   // rigs are built in metres
+
+function applyTheme() {
+  scene.background = new THREE.Color(cssVar('--scene-bg') || '#e9edf3');
+  floor.material.color.set(cssVar('--scene-floor') || '#d5dae3');
+}
+applyTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { applyTheme(); refreshStatic(); });
+
+function resize() {
+  const w = el.view.clientWidth, h = el.view.clientHeight; if (!w || !h) return;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); if (!state.zoomed) renderer.render(scene, camera);
+}
+new ResizeObserver(resize).observe(el.view);
+
+// ---- state -----------------------------------------------------------------------------------
+const state = { rigId: null, rig: null, lanes: [], inter: [], control: 0, playing: false, wet: false, zoomed: false };
+const cfg = () => RIGS[state.rigId];
+
+function computeInter(i) {
+  const [aId, bId] = state.lanes[i], a = cfg().aSet[aId], b = SOLIDS[bId];
+  state.inter[i] = state.rigId === 'drag' ? solidInteract(a, b, { wet: state.wet }) : wetInteract(a, b);
+  state.rig.setPair(i, a, b, state.inter[i]);
+}
+function setControl(v) {
+  state.control = v; el.slider.value = Math.round(v * 1000);
+  state.rig.setControl(v); el.controlValue.textContent = state.rig.controlLabel(v);
+}
+function setPlaying(p) { state.playing = p; el.play.textContent = p ? '❚❚ Pause' : '▶ Run test'; }
+function restart() { setPlaying(false); state.rig.reset(); setControl(0); lastHTML = ''; if (state.zoomed) buildMol(); }
+function applyPairs() { computeInter(0); computeInter(1); restart(); refreshStatic(); }
+
+function buildLanes() {
+  el.lanes.innerHTML = '';
+  [0, 1].forEach((i) => {
+    const box = document.createElement('div'); box.className = 'lane' + (i ? ' b' : '');
+    box.innerHTML = `<h2>${i ? 'B' : 'A'}</h2>`;
+    [[cfg().aLabel, cfg().aSet, 0], [cfg().bLabel, SOLIDS, 1]].forEach(([label, set, slot]) => {
+      const lab = document.createElement('label'); lab.textContent = label;
+      const sel = document.createElement('select');
+      for (const [id, m] of Object.entries(set)) sel.add(new Option(m.name, id));
+      sel.value = state.lanes[i][slot];
+      sel.addEventListener('change', () => { state.lanes[i][slot] = sel.value; applyPairs(); });
+      lab.appendChild(sel); box.appendChild(lab);
+    });
+    el.lanes.appendChild(box);
+  });
+}
+
+function switchRig(id) {
+  if (state.rig) { world.remove(state.rig.group); state.rig.dispose(); }
+  state.rigId = id; const c = cfg();
+  state.rig = new c.Rig(); world.add(state.rig.group);
+  state.lanes = c.presets[0].lanes.map((l) => [...l]); state.wet = false; el.wet.checked = false;
+  [...el.tabs.children].forEach((b) => b.setAttribute('aria-selected', b.dataset.id === id));
+  el.blurb.textContent = c.blurb; el.controlName.textContent = c.control; el.wetWrap.hidden = !c.wet;
+  el.presets.innerHTML = '';
+  c.presets.forEach((p) => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = p.name;
+    b.addEventListener('click', () => { state.lanes = p.lanes.map((l) => [...l]); buildLanes(); applyPairs(); });
+    el.presets.appendChild(b);
+  });
+  buildLanes(); applyPairs();
+  camera.position.set(...c.camera); orbit.target.set(...c.target); orbit.update();
+  if (state.zoomed) markHome();
+}
+
+for (const [id, c] of Object.entries(RIGS)) {
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = c.tab; b.dataset.id = id; b.setAttribute('role', 'tab');
+  b.addEventListener('click', () => switchRig(id)); el.tabs.appendChild(b);
+}
+el.slider.addEventListener('input', () => { setPlaying(false); setControl(el.slider.value / 1000); });
+el.play.addEventListener('click', () => { if (!state.playing && state.control >= 0.999) restart(); setPlaying(!state.playing); });
+el.reset.addEventListener('click', restart);
+el.wet.addEventListener('change', () => { state.wet = el.wet.checked; applyPairs(); });
+
+// ---- panels ----------------------------------------------------------------------------------
+let lastHTML = '';
+const laneData = () => [0, 1].map((i) => ({ a: cfg().aSet[state.lanes[i][0]], b: SOLIDS[state.lanes[i][1]], inter: state.inter[i], result: state.rig.result(i) }));
+function refreshStatic() { drawMicro(el.micro, state.rigId, laneData()); refreshLive(); }
+function refreshLive() {
+  const data = laneData();
+  el.readouts.innerHTML = data.map((l, i) => `<div class="chip ${i ? 'b' : ''}"><b>${i ? 'B' : 'A'} · ${l.a.name} on ${l.b.name}</b><span>${state.rig.live(i)}</span></div>`).join('');
+  const html = explainHTML(state.rigId, data);
+  if (html !== lastHTML) { el.explain.innerHTML = html; lastHTML = html; }
+  const tr = state.rig.trace(); el.chartTitle.textContent = tr.title; drawChart(el.chart, tr);
+}
+window.addEventListener('resize', refreshStatic);
+
+// ---- molecular zoom --------------------------------------------------------------------------
+const mol = new MolecularView(renderer, el.molOverlay);
+const zoom = { phase: null, t: 0, pos: new THREE.Vector3(), target: new THREE.Vector3(), near: new THREE.Vector3(), focus: new THREE.Vector3() };
+const ease = (t) => t * t * (3 - 2 * t);
+function buildMol() { const d = laneData(); mol.build(state.rigId, d); el.molExplain.innerHTML = molecularHTML(state.rigId, d); }
+function markHome() {   // where the camera returns to on zoom out, and the contact point it dives into
+  zoom.pos.copy(camera.position); zoom.target.copy(orbit.target);
+  zoom.focus.copy(state.rig.focus()).multiplyScalar(10);
+  zoom.near.copy(zoom.pos).sub(zoom.focus).setLength(1.1).add(zoom.focus);
+}
+function showMol(on) {
+  state.zoomed = on; el.molOverlay.hidden = !on; el.molExplain.hidden = !on;
+  if (on) buildMol(); else renderer.setViewport(0, 0, el.view.clientWidth, el.view.clientHeight);
+}
+function toggleZoom() {
+  if (zoom.phase) return;
+  if (!state.zoomed) { markHome(); orbit.enabled = false; zoom.phase = 'in'; } else zoom.phase = 'out';
+  zoom.t = 0; el.zoom.textContent = state.zoomed ? '🔬 Zoom to molecules' : '↩ Zoom back out';
+}
+function flyCamera(from, to, tFrom, tTo, e) { camera.position.lerpVectors(from, to, e); orbit.target.lerpVectors(tFrom, tTo, e); camera.lookAt(orbit.target); }
+function stepZoom(dt) {
+  const z = zoom; if (!z.phase) return;
+  if (z.phase === 'in') {              // dive towards the contact, fading out at the end
+    z.t = Math.min(1, z.t + dt / 0.8); flyCamera(z.pos, z.near, z.target, z.focus, ease(z.t));
+    el.fade.style.opacity = Math.max(0, (z.t - 0.5) / 0.5);
+    if (z.t >= 1) { showMol(true); z.phase = 'reveal'; z.t = 0; }
+  } else if (z.phase === 'reveal') {
+    z.t = Math.min(1, z.t + dt / 0.35); el.fade.style.opacity = 1 - z.t; if (z.t >= 1) z.phase = null;
+  } else if (z.phase === 'out') {
+    z.t = Math.min(1, z.t + dt / 0.25); el.fade.style.opacity = z.t;
+    if (z.t >= 1) { showMol(false); z.phase = 'back'; z.t = 0; }
+  } else {                             // fly back to where the camera was
+    z.t = Math.min(1, z.t + dt / 0.8); flyCamera(z.near, z.pos, z.focus, z.target, ease(z.t));
+    el.fade.style.opacity = Math.max(0, 1 - z.t / 0.5);
+    if (z.t >= 1) { orbit.enabled = true; z.phase = null; }
+  }
+}
+el.zoom.addEventListener('click', toggleZoom);
+
+// ---- loop ------------------------------------------------------------------------------------
+let last = performance.now(), acc = 0;
+function advance(dt) {
+  if (state.playing) { const v = Math.min(1, state.control + dt / cfg().sweep); setControl(v); if (v >= 1) setPlaying(false); }
+  state.rig.step(dt);
+  stepZoom(dt);
+  if (state.zoomed) { mol.step(dt, laneData()); mol.render(); }
+  else { if (!zoom.phase) orbit.update(); renderer.render(scene, camera); }
+  acc += dt; if (acc > 0.15) { acc = 0; refreshLive(); }
+}
+function frame(now) {
+  const dt = Math.min(0.033, (now - last) / 1000); last = now;
+  advance(dt);
+  requestAnimationFrame(frame);
+}
+switchRig('tilt'); resize();
+requestAnimationFrame(frame);
+window.lab = { state, RIGS, mol, zoom, toggleZoom, advance };   // handy for debugging in the console
