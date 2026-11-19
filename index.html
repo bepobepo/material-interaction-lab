@@ -36,6 +36,11 @@
         <input id="slider" type="range" min="0" max="1000" value="0">
         <output id="controlValue">0°</output>
       </label>
+      <label class="check" title="On: Run test moves the control for you. Off: it stays where you set it and Run test just lets time pass."><input id="auto" type="checkbox" checked> <span id="autoName">Auto-tilt</span></label>
+      <label class="check" title="How fast time runs">Speed
+        <select id="speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>
+        <output id="clock">0.0 s</output>
+      </label>
       <label id="wetWrap" class="check" hidden><input id="wet" type="checkbox"> Wet surface</label>
       <button id="reset" type="button">Reset</button>
       <button id="zoom" type="button" title="Dive into the contact and watch the molecules">🔬 Zoom to molecules</button>

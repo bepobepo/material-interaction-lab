@@ -24,7 +24,7 @@ class Lane {
     this.plate.position.y = -TH / 2; this.plate.castShadow = this.plate.receiveShadow = true;
     this.pivot.add(this.plate);
 
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, PIVOT_Y - 0.02, 12), standMaterial());
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.006, PIVOT_Y - 0.02, 12), standMaterial());
     post.position.y = (PIVOT_Y - 0.02) / 2; post.castShadow = true; this.root.add(post);
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.055, 0.008, 24), standMaterial());
     base.position.y = 0.004; base.receiveShadow = true; this.root.add(base);
@@ -78,6 +78,7 @@ class Lane {
     const h = this.h, I = this.inter, S = Math.sin(angle), C = Math.cos(angle);
     const rg = this.sub.density * G, mu = Math.max(this.sub.viscosity, 0.002), tauY = I.tauEff;
     const hFront = I.hFront * Math.max(0.12, C), hEdge = hFront * 0.3, hRes = I.hRes, hMin = I.beads ? 0.0006 : 0;
+    const slip = 0.025 * (1 - I.wetting) ** 2;                 // slip length (m): none on a well-wetted surface
     const dts = dt / SUBSTEPS, mMax = 0.2 * DX * DX / (rg * dts), k = dts / DX;
     let lost = 0;
 
@@ -91,7 +92,7 @@ class Lane {
       const he = hd > hMin ? hd : hMin, tb = he * Gf;
       if (tb <= tauY) return;                                  // below yield stress: stays put
       const B = tauY / tb;
-      let m = he * he * he / (3 * mu) * (1 - 1.5 * B + 0.5 * B * B * B);
+      let m = he * he * he / (3 * mu) * (1 - 1.5 * B + 0.5 * B * B * B) + slip * he * he / mu * (1 - B);   // second term: sliding along a surface it barely grips
       if (m > mMax) m = mMax;
       let dq = m * Gf * k; const lim = 0.25 * (hd - hRes); if (dq > lim) dq = lim;
       h[d] -= dq; if (r >= 0) h[r] += dq; else lost += dq;
@@ -117,7 +118,8 @@ class Lane {
       const thin = 0.15 * hFront;
       for (let j = NY - 1; j >= 0; j--) for (let i = 0; i < NX; i++) {
         const idx = j * NX + i, v = h[idx];
-        if (v > 0 && v < thin) { h[idx] = 0; if (j < NY - 1) h[idx + NX] += v; else lost += v; }
+        // only trailing residue: a thin cell fed by thick liquid just above it is the advancing front, so it stays
+        if (v > 0 && v < thin && (j === 0 || h[idx - NX] < thin)) { h[idx] = 0; if (j < NY - 1) h[idx + NX] += v; else lost += v; }
       }
     }
     this.lost += lost;
@@ -157,28 +159,32 @@ export class TiltRig {
     this.group = new THREE.Group();
     this.lanes = [new Lane(0), new Lane(1)];
     this.lanes.forEach((l) => this.group.add(l.root));
-    this.target = 0; this.angle = 0; this.t = 0; this.traces = [[], []];
+    this.target = 0; this.angle = 0; this.t = 0; this.clock = 0; this.traces = [[], []];
   }
   setPair(i, a, b, inter) { this.lanes[i].setPair(a, b, inter); }
   setControl(v) { this.target = v * MAX_ANGLE; }
   controlLabel(v) { return Math.round(v * 80) + '°'; }
-  reset() { this.angle = this.target = 0; this.traces = [[], []]; this.lanes.forEach((l) => { l.pivot.rotation.x = 0; if (l.sub) l.seed(); }); }
+  reset() { this.angle = this.target = 0; this.clock = 0; this.traces = [[], []]; this.lanes.forEach((l) => { l.pivot.rotation.x = 0; if (l.sub) l.seed(); }); }
   step(dt) {
     const d = this.target - this.angle, max = 1.2 * dt;
     this.angle += Math.abs(d) < max ? d : Math.sign(d) * max;
     this.lanes.forEach((l) => l.step(dt, this.angle));
-    this.t += dt;
+    this.t += dt; this.clock += dt;
     if (this.t > 0.1) {
       this.t = 0;
       this.lanes.forEach((l, i) => {
         const tr = this.traces[i], x = this.angle * 180 / Math.PI, y = l.result().onPlate * 100, last = tr[tr.length - 1];
-        if (!last || Math.abs(last.x - x) > 0.2 || Math.abs(last.y - y) > 0.5) { tr.push({ x, y }); if (tr.length > 800) tr.shift(); }
+        if (!last || Math.abs(last.x - x) > 0.2 || Math.abs(last.y - y) > 0.5) { tr.push({ x, y, s: this.clock }); if (tr.length > 800) tr.shift(); }
       });
     }
   }
   result(i) { return this.lanes[i].result(); }
   focus() { return new THREE.Vector3(0, PIVOT_Y + 0.006, 0); }
   live(i) { const r = this.result(i); return Math.round(r.onPlate * 100) + '% still on the plate'; }
-  trace() { return { title: 'How much stays on the plate', x: 'tilt (°)', y: '% on plate', xMax: 80, yMax: 100, series: this.traces }; }
+  trace(byTime) {   // against tilt for a sweep; against time when the tilt is held
+    if (!byTime) return { title: 'How much stays on the plate', x: 'tilt (°)', y: '% on plate', xMax: 80, yMax: 100, series: this.traces };
+    const series = this.traces.map((tr, i) => tr.length ? [...tr.map((p) => ({ x: p.s, y: p.y })), { x: this.clock, y: this.lanes[i].result().onPlate * 100 }] : []);
+    return { title: 'How much stays on the plate over time', x: 'time (s)', y: '% on plate', xMax: Math.max(20, Math.ceil(this.clock / 20) * 20), yMax: 100, series };
+  }
   dispose() { disposeGroup(this.group); }
 }

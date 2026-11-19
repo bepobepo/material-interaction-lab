@@ -153,11 +153,11 @@ class LaneScene {
   }
 
   // push the rig's live state into the particle model
-  drive(dt, lane, simT) {
+  drive(dt, lane, simT, paused) {
     const s = this.sim, r = lane.result, I = lane.inter;
     if (this.rigId === 'tilt') {
       const moving = r.onset !== null;
-      s.gx = (moving ? 1 : 0.12) * 2 * Math.sin(r.angle * Math.PI / 180);
+      s.gx = paused ? 0 : (moving ? 1 : 0.12) * 2 * Math.sin(r.angle * Math.PI / 180);
       s.keep = Math.ceil(this.n0 * r.onPlate);
       if (moving && s.netStart >= 0) this.cutNet();
     } else if (this.rigId === 'pull') {
@@ -193,7 +193,7 @@ class LaneScene {
       }
     } else {
       const Fs = Math.max(0.05, I.muS * 4.905);
-      if (!r.stuck) this.carry += clamp(r.speed * 60, 2, 8) * dt;
+      if (!r.stuck && !paused) this.carry += clamp(r.speed * 60, 2, 8) * dt;
       const target = this.carry + 0.8 * Math.min(1, r.force / Fs);
       s.off[4] += (target - s.off[4]) * Math.min(1, dt * 14);
       s.off[5] += (this.ride(s.off[4]) - s.off[5]) * Math.min(1, dt * 12);
@@ -211,9 +211,9 @@ class LaneScene {
     s.bonds.length = s.netStart; s.netStart = -1;
   }
 
-  step(dt, lane) {
+  step(dt, lane, paused) {
     const s = this.sim, steps = clamp(Math.round(dt * 240), 1, 8);
-    this.drive(dt, lane, steps * DT);
+    this.drive(dt, lane, steps * DT, paused);
     for (let k = 0; k < steps; k++) s.step(DT, k === steps - 1);
     for (const f of s.flashes) f.life -= dt / 0.35;
     s.flashes = s.flashes.filter((f) => f.life > 0);
@@ -285,11 +285,11 @@ export class MolecularView {
     });
     this.acc = 1;
   }
-  step(dt, data) {
+  step(dt, data, paused) {
     const el = this.renderer.domElement;
     if (el.clientWidth !== this.size[0] || el.clientHeight !== this.size[1]) { if (this.layout() !== this.W) { this.build(this.rigId, data); } }
     this.data = data;
-    this.lanes.forEach((l, i) => l.step(dt, data[i]));
+    this.lanes.forEach((l, i) => l.step(dt, data[i], paused));
     this.acc += dt;
     if (this.acc > 0.2) {
       this.acc = 0;

@@ -13,7 +13,7 @@ import { molecularHTML } from './molecular/captions.js';
 
 const RIGS = {
   tilt: {
-    tab: 'Tilt a plate', Rig: TiltRig, aSet: SUBSTANCES, aLabel: 'Substance', bLabel: 'Plate surface', control: 'Tilt', sweep: 14,
+    tab: 'Tilt a plate', Rig: TiltRig, aSet: SUBSTANCES, aLabel: 'Substance', bLabel: 'Plate surface', control: 'Tilt', auto: 'Auto-tilt', sweep: 14,
     blurb: 'Put a spoonful on a plate, tilt it, and see what runs and what clings.',
     camera: [5.4, 5.2, 6.6], target: [0, 1.6, 0],
     presets: [
@@ -24,7 +24,7 @@ const RIGS = {
     ],
   },
   pull: {
-    tab: 'Pull apart', Rig: PullRig, aSet: SUBSTANCES, aLabel: 'Substance between', bLabel: 'Surfaces', control: 'Separation', sweep: 7,
+    tab: 'Pull apart', Rig: PullRig, aSet: SUBSTANCES, aLabel: 'Substance between', bLabel: 'Surfaces', control: 'Separation', auto: 'Auto-pull', sweep: 7,
     blurb: 'Squash something between two surfaces, pull them apart, and see what stretches, tears or peels.',
     camera: [1.0, 3.2, 8.6], target: [0, 1.55, 0],
     presets: [
@@ -35,7 +35,7 @@ const RIGS = {
     ],
   },
   drag: {
-    tab: 'Drag a block', Rig: DragRig, aSet: SOLIDS, aLabel: 'Block', bLabel: 'Surface', control: 'Pull handle', sweep: 6, wet: true,
+    tab: 'Drag a block', Rig: DragRig, aSet: SOLIDS, aLabel: 'Block', bLabel: 'Surface', control: 'Pull handle', auto: 'Auto-pull', sweep: 6, wet: true,
     blurb: 'Pull a block across a surface with a spring and feel how much it grips.',
     camera: [5.6, 4.4, 7.4], target: [0.2, 0.2, 0.2],
     presets: [
@@ -50,7 +50,7 @@ const RIGS = {
 const $ = (id) => document.getElementById(id);
 const el = { view: $('view'), tabs: $('tabs'), blurb: $('blurb'), presets: $('presets'), lanes: $('lanes'), readouts: $('readouts'), play: $('play'),
   slider: $('slider'), controlName: $('controlName'), controlValue: $('controlValue'), wetWrap: $('wetWrap'), wet: $('wet'), reset: $('reset'),
-  explain: $('explain'), chart: $('chart'), chartTitle: $('chartTitle'), micro: $('micro'), zoom: $('zoom'), fade: $('fade'), molOverlay: $('molOverlay'), molExplain: $('molExplain') };
+  explain: $('explain'), chart: $('chart'), chartTitle: $('chartTitle'), micro: $('micro'), zoom: $('zoom'), auto: $('auto'), autoName: $('autoName'), speed: $('speed'), clock: $('clock'), fade: $('fade'), molOverlay: $('molOverlay'), molExplain: $('molExplain') };
 
 // ---- scene -----------------------------------------------------------------------------------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -89,7 +89,8 @@ function resize() {
 new ResizeObserver(resize).observe(el.view);
 
 // ---- state -----------------------------------------------------------------------------------
-const state = { rigId: null, rig: null, lanes: [], inter: [], control: 0, playing: false, wet: false, zoomed: false };
+// playing: time is running · sweep: the control is being moved for us · auto: Run test sweeps the control · fresh: nothing has run since the last reset
+const state = { rigId: null, rig: null, lanes: [], inter: [], control: 0, playing: false, sweep: false, auto: true, fresh: true, speed: 1, clock: 0, wet: false, zoomed: false };
 const cfg = () => RIGS[state.rigId];
 
 function computeInter(i) {
@@ -101,8 +102,14 @@ function setControl(v) {
   state.control = v; el.slider.value = Math.round(v * 1000);
   state.rig.setControl(v); el.controlValue.textContent = state.rig.controlLabel(v);
 }
-function setPlaying(p) { state.playing = p; el.play.textContent = p ? '❚❚ Pause' : '▶ Run test'; }
-function restart() { setPlaying(false); state.rig.reset(); setControl(0); lastHTML = ''; if (state.zoomed) buildMol(); }
+function setPlaying(p) {
+  state.playing = p; if (p) state.fresh = false; else state.sweep = false;
+  el.play.textContent = p ? '❚❚ Pause' : state.fresh ? '▶ Run test' : '▶ Resume';
+}
+function restart() {   // fresh sample; with auto off the control keeps the value the user chose
+  const keep = state.auto ? 0 : state.control;
+  state.fresh = true; state.clock = 0; setPlaying(false); state.rig.reset(); setControl(keep); lastHTML = ''; if (state.zoomed) buildMol();
+}
 function applyPairs() { computeInter(0); computeInter(1); restart(); refreshStatic(); }
 
 function buildLanes() {
@@ -126,9 +133,9 @@ function switchRig(id) {
   if (state.rig) { world.remove(state.rig.group); state.rig.dispose(); }
   state.rigId = id; const c = cfg();
   state.rig = new c.Rig(); world.add(state.rig.group);
-  state.lanes = c.presets[0].lanes.map((l) => [...l]); state.wet = false; el.wet.checked = false;
+  state.lanes = c.presets[0].lanes.map((l) => [...l]); state.wet = false; el.wet.checked = false; state.control = 0;
   [...el.tabs.children].forEach((b) => b.setAttribute('aria-selected', b.dataset.id === id));
-  el.blurb.textContent = c.blurb; el.controlName.textContent = c.control; el.wetWrap.hidden = !c.wet;
+  el.blurb.textContent = c.blurb; el.controlName.textContent = c.control; el.autoName.textContent = c.auto; el.wetWrap.hidden = !c.wet;
   el.presets.innerHTML = '';
   c.presets.forEach((p) => {
     const b = document.createElement('button'); b.type = 'button'; b.textContent = p.name;
@@ -144,8 +151,22 @@ for (const [id, c] of Object.entries(RIGS)) {
   const b = document.createElement('button'); b.type = 'button'; b.textContent = c.tab; b.dataset.id = id; b.setAttribute('role', 'tab');
   b.addEventListener('click', () => switchRig(id)); el.tabs.appendChild(b);
 }
-el.slider.addEventListener('input', () => { setPlaying(false); setControl(el.slider.value / 1000); });
-el.play.addEventListener('click', () => { if (!state.playing && state.control >= 0.999) restart(); setPlaying(!state.playing); });
+el.slider.addEventListener('input', () => {   // by hand: live in auto mode; with auto off and time stopped it only picks the value to hold
+  state.sweep = false; setControl(el.slider.value / 1000);
+  if (state.auto && !state.playing) setPlaying(true);
+});
+el.play.addEventListener('click', () => {
+  if (state.playing) return setPlaying(false);
+  setPlaying(true); state.sweep = state.auto && state.control < 0.999;
+});
+el.auto.addEventListener('change', () => {
+  state.auto = el.auto.checked;
+  if (!state.auto) state.sweep = false;
+  else if (state.fresh) setControl(0);
+  else if (state.playing) state.sweep = state.control < 0.999;
+  refreshLive();
+});
+el.speed.addEventListener('change', () => { state.speed = +el.speed.value; });
 el.reset.addEventListener('click', restart);
 el.wet.addEventListener('change', () => { state.wet = el.wet.checked; applyPairs(); });
 
@@ -158,7 +179,8 @@ function refreshLive() {
   el.readouts.innerHTML = data.map((l, i) => `<div class="chip ${i ? 'b' : ''}"><b>${i ? 'B' : 'A'} · ${l.a.name} on ${l.b.name}</b><span>${state.rig.live(i)}</span></div>`).join('');
   const html = explainHTML(state.rigId, data);
   if (html !== lastHTML) { el.explain.innerHTML = html; lastHTML = html; }
-  const tr = state.rig.trace(); el.chartTitle.textContent = tr.title; drawChart(el.chart, tr);
+  const tr = state.rig.trace(!state.auto); el.chartTitle.textContent = tr.title; drawChart(el.chart, tr);
+  el.clock.textContent = state.clock.toFixed(1) + ' s';
 }
 window.addEventListener('resize', refreshStatic);
 
@@ -204,10 +226,16 @@ el.zoom.addEventListener('click', toggleZoom);
 // ---- loop ------------------------------------------------------------------------------------
 let last = performance.now(), acc = 0;
 function advance(dt) {
-  if (state.playing) { const v = Math.min(1, state.control + dt / cfg().sweep); setControl(v); if (v >= 1) setPlaying(false); }
-  state.rig.step(dt);
+  if (state.playing) {                 // simulated time = real time x speed, in steps no longer than one frame
+    const n = Math.ceil(state.speed), h = dt * state.speed / n;
+    for (let k = 0; k < n; k++) {
+      if (state.sweep) { const v = Math.min(1, state.control + h / cfg().sweep); setControl(v); if (v >= 1) state.sweep = false; }
+      state.rig.step(h);
+    }
+    state.clock += dt * state.speed;
+  }
   stepZoom(dt);
-  if (state.zoomed) { mol.step(dt, laneData()); mol.render(); }
+  if (state.zoomed) { mol.step(state.playing ? Math.min(0.05, dt * state.speed) : dt, laneData(), !state.playing); mol.render(); }
   else { if (!zoom.phase) orbit.update(); renderer.render(scene, camera); }
   acc += dt; if (acc > 0.15) { acc = 0; refreshLive(); }
 }
