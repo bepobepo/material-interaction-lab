@@ -57,6 +57,27 @@
     <canvas id="micro"></canvas>
   </aside>
 </main>
-<script type="module" src="js/main.js"></script>
+<script type="module">
+// Cache-busting without a build step. Browsers keep the page, the stylesheet and each script for a few minutes
+// separately, so right after an update a visitor could get a new page with old scripts. Before starting, ask the
+// server whether each file has changed (a tiny request when it has not), which also refreshes the browser's copy.
+const get = (url, cache) => fetch(url, { cache }).then((r) => (r.ok ? r.text() : ''));
+const changed = async (url) => { const had = await get(url, 'force-cache'), now = await get(url, 'no-cache'); return !!now && now !== had; };
+const seen = new Set();
+async function refresh(url) {            // walk the scripts this site imports from itself
+  if (seen.has(url)) return; seen.add(url);
+  const src = await get(url, 'no-cache');
+  const deps = [...src.matchAll(/(?:from|import)\s*['"](\.{1,2}\/[^'"]+)['"]/g)].map((m) => new URL(m[1], url).href);
+  await Promise.all(deps.map(refresh));
+}
+try {
+  const page = location.href.split('#')[0], css = document.querySelector('link[rel=stylesheet]');
+  const [pageChanged, cssChanged] = await Promise.all([changed(page), changed(css.href), refresh(new URL('js/main.js', page).href)]);
+  const last = +sessionStorage.getItem('reloaded') || 0;
+  if (pageChanged && Date.now() - last > 10000) { sessionStorage.setItem('reloaded', Date.now()); location.reload(); await new Promise(() => {}); }
+  if (cssChanged) css.href = css.href;   // re-read the stylesheet now that the browser's copy is current
+} catch (e) { /* offline or blocked: start with whatever the browser has */ }
+import('./js/main.js');
+</script>
 </body>
 </html>
