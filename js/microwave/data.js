@@ -13,14 +13,15 @@ export const FOODS = {
   honey:   { name: 'Honey',          water: 0.17, loss: 0.45,  lossHot: 1.3,  iceLoss: 1,     pen: 0.014, rho: 1400, c: 2300, k: 0.5,  mix: 2,  boil: 115, stir: true,  shape: 'liquid', freezes: false },
 };
 
+// col: its own colour | detail: surface pattern | clear: how see-through it is (1 = solid)
 // loss / pen as above | rc: heat capacity per volume of the wall as modelled (J/m³·K, scaled down for thin walls) | k W/m·K
 export const CONTAINERS = {
   none:      { name: 'None (on the turntable)', noun: 'turntable', shape: 'none' },
-  glass:     { name: 'Glass bowl',     noun: 'bowl',  shape: 'bowl',  loss: 0.002, pen: 2,    rc: 1.25e6, k: 1.1 },
-  porcelain: { name: 'Porcelain bowl', noun: 'bowl',  shape: 'bowl',  loss: 0.006, pen: 1,    rc: 1.45e6, k: 1.5 },
-  stoneware: { name: 'Stoneware bowl', noun: 'bowl',  shape: 'bowl',  loss: 0.2,   pen: 0.04, rc: 2.0e6,  k: 1.3 },
-  plastic:   { name: 'Plastic tub',    noun: 'tub',   shape: 'bowl',  loss: 0.001, pen: 5,    rc: 3.4e5,  k: 0.2 },
-  paper:     { name: 'Paper plate',    noun: 'plate', shape: 'plate', loss: 0.004, pen: 2,    rc: 2.0e5,  k: 0.08 },
+  glass:     { name: 'Glass bowl',     noun: 'bowl',  shape: 'bowl',  col: '#bcd9e2', clear: 0.5, loss: 0.002, pen: 2,    rc: 1.25e6, k: 1.1 },
+  porcelain: { name: 'Porcelain bowl', noun: 'bowl',  shape: 'bowl',  col: '#f3f1ea', loss: 0.006, pen: 1,    rc: 1.45e6, k: 1.5 },
+  stoneware: { name: 'Stoneware bowl', noun: 'bowl',  shape: 'bowl',  col: '#b08a5c', detail: 'speckle', loss: 0.2,   pen: 0.04, rc: 2.0e6,  k: 1.3 },
+  plastic:   { name: 'Plastic tub',    noun: 'tub',   shape: 'bowl',  col: '#e4e8ef', clear: 0.75, loss: 0.001, pen: 5,    rc: 3.4e5,  k: 0.2 },
+  paper:     { name: 'Paper plate',    noun: 'plate', shape: 'plate', col: '#ece2cc', detail: 'pleat', loss: 0.004, pen: 2,    rc: 2.0e5,  k: 0.08 },
 };
 
 export const STARTS = {

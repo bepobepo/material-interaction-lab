@@ -16,7 +16,7 @@ export function fieldAt(x, y, z) {
 }
 
 // Thermal-camera palette, sRGB 0..1.
-const STOPS = [[-18, 27, 31, 107], [0, 42, 111, 219], [20, 34, 195, 214], [45, 63, 191, 90], [65, 242, 213, 60], [85, 240, 138, 36], [100, 217, 33, 33], [130, 255, 233, 224]];
+const STOPS = [[-18, 40, 46, 140], [0, 42, 111, 219], [20, 34, 195, 214], [45, 63, 191, 90], [65, 242, 213, 60], [85, 240, 138, 36], [100, 217, 33, 33], [130, 255, 233, 224]];
 export function thermal(T, out = [0, 0, 0]) {
   let k = 0; while (k < STOPS.length - 2 && T > STOPS[k + 1][0]) k++;
   const a = STOPS[k], b = STOPS[k + 1], f = clamp((T - a[0]) / (b[0] - a[0]), 0, 1);
@@ -183,18 +183,20 @@ export class HeatField {
     return this.s;
   }
 
-  // Temperature at a point fixed in the oven (the food turns underneath it); kind 1 food, 2 container.
-  sample(x, y, z, kind) {
-    const c = this.cosT, s = this.sinT, fx = (x * c + y * s + HALF) / DX - 0.5, fy = (-x * s + y * c + HALF) / DX - 0.5, fz = z / DX - 0.5;
+  // Temperature at a point; kind 1 food, 2 container. By default the point is fixed in the oven (the food turns
+  // underneath it); with local set it is fixed in the food. Also leaves the ice fraction there in this.iceOut.
+  sample(x, y, z, kind, local) {
+    const c = local ? 1 : this.cosT, s = local ? 0 : this.sinT, fx = (x * c + y * s + HALF) / DX - 0.5, fy = (-x * s + y * c + HALF) / DX - 0.5, fz = z / DX - 0.5;
     const ix = Math.floor(fx), iy = Math.floor(fy), iz = Math.floor(fz), tx = fx - ix, ty = fy - iy, tz = fz - iz;
-    let sum = 0, ws = 0;
+    let sum = 0, ws = 0, ice = 0;
     for (let q = 0; q < 8; q++) {
       const a = ix + (q & 1), b = iy + (q >> 1 & 1), d = iz + (q >> 2);
       if (a < 0 || b < 0 || d < 0 || a >= NX || b >= NX || d >= NZ) continue;
       const i = this.map[(d * NX + b) * NX + a]; if (i < 0 || this.kind[i] !== kind) continue;
       const wt = (q & 1 ? tx : 1 - tx) * (q >> 1 & 1 ? ty : 1 - ty) * (q >> 2 ? tz : 1 - tz) + 1e-4;
-      sum += wt * this.T[i]; ws += wt;
+      sum += wt * this.T[i]; ice += wt * this.ice[i]; ws += wt;
     }
+    this.iceOut = ws > 0 ? ice / ws : kind === 1 ? this.s.frozen : 0;
     return ws > 0 ? sum / ws : (kind === 1 ? this.s.avg : this.s.contAvg);
   }
 }

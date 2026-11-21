@@ -28,7 +28,11 @@
   </aside>
 
   <section id="stage">
-    <div id="view"><div id="fade"></div><div id="molOverlay" hidden></div><div id="heatScale" hidden></div></div>
+    <div id="view"><div id="fade"></div><div id="molOverlay" hidden></div><div id="heatScale" hidden></div>
+      <div id="viewOpts" data-rig="microwave" hidden>
+        <label title="Off: the food and its container are shown whole, and the container turns see-through"><input id="cut" type="checkbox" checked> Cut open</label>
+        <label title="Off: everything is shown in its real colours, as you would see it through the oven door"><input id="heat" type="checkbox" checked> Heat colours</label>
+      </div></div>
     <div id="readouts"></div>
     <div id="controls">
       <button id="play" type="button">▶ Run test</button>
