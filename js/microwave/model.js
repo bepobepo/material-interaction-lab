@@ -11,8 +11,9 @@ const KX = 2 * Math.PI / 0.07, KY = 2 * Math.PI / 0.08, KZ = 2 * Math.PI / 0.09;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 // Relative field strength at a point in the oven (x, y across, z up, metres from the turntable centre).
+// Up and down it is weakest right at the metal floor, where the waves cancel, and strongest about 2 cm above the turntable.
 export function fieldAt(x, y, z) {
-  return 0.25 + 0.75 * (0.5 + 0.5 * Math.cos(KX * x + 1.1)) * (0.5 + 0.5 * Math.cos(KY * y + 2.4)) * (0.65 + 0.35 * Math.cos(KZ * z + 0.6)) * 2.2;
+  return 0.25 + 0.75 * (0.5 + 0.5 * Math.cos(KX * x + 1.1)) * (0.5 + 0.5 * Math.cos(KY * y + 2.4)) * (0.65 + 0.35 * Math.cos(KZ * (z - 0.02))) * 2.2;
 }
 
 // Thermal-camera palette, sRGB 0..1.
@@ -185,6 +186,10 @@ export class HeatField {
     for (let i = 0; i < n; i++) if (this.kind[i] === 1 && Math.hypot(this.px[i] - p0.x, this.py[i] - p0.y) < DX * 1.5 && Math.abs(this.pz[i] - zMid) < DX * 1.1) this.mid.push(i);
     this.nFood = 0; for (let i = 0; i < n; i++) if (this.kind[i] === 1) this.nFood++;
     this.nCont = n - this.nFood;
+    // the lowest and highest thirds of the food, to tell whether its underside or its top is hotter
+    let zLo = 1, zHi = 0; for (let i = 0; i < n; i++) if (this.kind[i] === 1) { zLo = Math.min(zLo, this.pz[i]); zHi = Math.max(zHi, this.pz[i]); }
+    this.band = new Int8Array(n); this.tall = zHi - zLo + DX;
+    for (let i = 0; i < n; i++) if (this.kind[i] === 1) this.band[i] = this.pz[i] < zLo + (zHi - zLo) / 3 ? 1 : this.pz[i] > zHi - (zHi - zLo) / 3 ? 2 : 0;
     // 5 mm cells can't follow a shape exactly, so each food cell is made to count for a little more or less until they add up to the amount asked for
     this.fill = S.want ? clamp(S.want / (this.nFood * V), 0.7, 1.4) : 1; this.grams = this.nFood * V * this.fill * food.rho * 1000;
     this.rcT *= this.fill; this.rcF *= this.fill; this.lat *= this.fill;
@@ -270,12 +275,12 @@ export class HeatField {
   }
 
   stats() {
-    const { n, T, kind, ice } = this; let fs = 0, hot = -1e9, cold = 1e9, fi = 0, cs = 0, ch = -1e9;
+    const { n, T, kind, ice, band } = this, bs = [0, 0, 0], bn = [0, 0, 0]; let fs = 0, hot = -1e9, cold = 1e9, fi = 0, cs = 0, ch = -1e9;
     for (let i = 0; i < n; i++) {
-      if (kind[i] === 1) { fs += T[i]; fi += ice[i]; if (T[i] > hot) hot = T[i]; if (T[i] < cold) cold = T[i]; } else { cs += T[i]; if (T[i] > ch) ch = T[i]; }
+      if (kind[i] === 1) { fs += T[i]; fi += ice[i]; bs[band[i]] += T[i]; bn[band[i]]++; if (T[i] > hot) hot = T[i]; if (T[i] < cold) cold = T[i]; } else { cs += T[i]; if (T[i] > ch) ch = T[i]; }
     }
     let mid = 0; for (const i of this.mid) mid += T[i]; mid = this.mid.length ? mid / this.mid.length : fs / this.nFood;
-    this.s = { avg: fs / this.nFood, hot, cold, mid, frozen: fi / this.nFood, contAvg: this.nCont ? cs / this.nCont : null, contHot: this.nCont ? ch : null };
+    this.s = { low: bn[1] ? bs[1] / bn[1] : fs / this.nFood, high: bn[2] ? bs[2] / bn[2] : fs / this.nFood, tall: this.tall, avg: fs / this.nFood, hot, cold, mid, frozen: fi / this.nFood, contAvg: this.nCont ? cs / this.nCont : null, contHot: this.nCont ? ch : null };
     return this.s;
   }
 

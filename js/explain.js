@@ -107,6 +107,10 @@ function microwaveLane({ a, b, inter: I, result: r }) {
     if (I.contAbsorbs) reasons.push(`${theC} <b>absorbs microwaves itself</b>${share !== null ? `: so far ${share}% of the absorbed energy went straight into the ${noun} instead of the food` : ''}.${I.frozen ? ` Frozen food takes up so little that the ${noun} gets a large share.` : ''}`);
     else reasons.push(`${theC} lets microwaves pass through, so the ${noun} only warms where hot food touches it${r.phase !== 'ready' && r.contHot > r.mid + 10 ? `. The food's outer layer heats first and sits right against it, which is why the ${noun} can feel hotter than the middle of the food` : ''}.`);
   }
+  if (r.phase !== 'ready' && !r.fire && r.tall > 0.02 && Math.abs(r.low - r.high) >= 10) {
+    const under = r.low > r.high;
+    reasons.push(`Its ${under ? 'underside' : 'top'} is hotter: about ${deg(under ? r.low : r.high)}, against ${deg(under ? r.high : r.low)} at the ${under ? 'top' : 'bottom'}. Microwaves bounce off the metal walls and add up to a fixed pattern of <b>strong and weak layers</b>. In this oven they are strongest about 2 cm above the turntable and fade higher up${r.turntable ? ', and turning the food evens things out sideways but not up and down' : ''}.`);
+  }
   if (!r.turntable) reasons.push(`The turntable is off, so the food sits still in the oven's <b>standing waves</b>: fixed hot and cold spots a few centimetres apart.`);
   if (r.power < 1) reasons.push(`At ${Math.round(r.power * 100)}% power the oven switches the microwaves on and off. The pauses give heat more time to spread from hot spots to cold ones. That helps a little, but heat needs minutes, not seconds, to travel a centimetre through food.`);
   const all = r.split.food + r.split.cont + r.split.lost;
