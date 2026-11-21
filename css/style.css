@@ -52,6 +52,11 @@ select { width: 100%; font: inherit; color: var(--ink); background: var(--chip);
 .slider output { min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
 .check { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 #controls select { width: auto; margin-top: 0; padding: 4px 6px; }
+#heatScale { position: absolute; left: 12px; bottom: 12px; z-index: 1; pointer-events: none; font-size: 11px; color: var(--ink); background: color-mix(in srgb, var(--panel) 82%, transparent); padding: 7px 14px 4px; border-radius: 8px; }
+#heatScale .bar { width: 190px; height: 10px; border-radius: 3px; }
+#heatScale .ticks { position: relative; width: 190px; height: 15px; }
+#heatScale .ticks span { position: absolute; top: 2px; transform: translateX(-50%); white-space: nowrap; }
+#controls button:disabled { opacity: 0.45; cursor: default; }
 #clock { min-width: 50px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 #explain .card { border: 1px solid var(--line); border-left: 4px solid var(--a); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
 #explain .card.b { border-left-color: var(--b); }

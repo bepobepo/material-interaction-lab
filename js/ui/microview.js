@@ -58,9 +58,31 @@ function wetPanel(g, x0, w, h, lane, seed, strands) {
   return `contact angle ≈ ${Math.round(I.contactAngle)}°`;
 }
 
+// Microwave tab: how the oven's output so far was shared between the food, its container, and nothing at all.
+function energyPanel(g, w, lanes) {
+  const x0 = 30, bw = w - x0 - 12, bh = 24, font = '-apple-system, Helvetica, Arial, sans-serif', grey = '#8b5cf6', pale = 'rgba(148,163,184,0.3)';
+  g.textBaseline = 'middle';
+  lanes.forEach((l, i) => {
+    const y = 14 + i * 44, s = l.result.split, tot = s.food + s.cont + s.lost;
+    g.fillStyle = LANE_COLORS[i]; g.font = 'bold 13px ' + font; g.textAlign = 'left'; g.fillText(i ? 'B' : 'A', 10, y + bh / 2);
+    if (!tot) { g.strokeStyle = cssVar('--line'); g.strokeRect(x0, y, bw, bh); g.fillStyle = cssVar('--muted'); g.font = '11px ' + font; g.fillText('Press Run to see where the energy goes', x0 + 8, y + bh / 2); return; }
+    let x = x0;
+    [[s.food, LANE_COLORS[i], '#fff'], [s.cont, grey, '#fff'], [s.lost, pale, cssVar('--ink')]].forEach(([v, fill, ink]) => {
+      const sw = bw * v / tot; g.fillStyle = fill; g.fillRect(x, y, sw, bh);
+      if (sw > 30) { g.fillStyle = ink; g.font = '11px ' + font; g.textAlign = 'center'; g.fillText(Math.round(v / tot * 100) + '%', x + sw / 2, y + bh / 2); }
+      x += sw;
+    });
+  });
+  let x = x0; g.font = '11px ' + font; g.textAlign = 'left';
+  [['food (lane colour)', LANE_COLORS[0]], ['container', grey], ['not absorbed', pale]].forEach(([label, fill]) => {
+    g.fillStyle = fill; g.fillRect(x, 108, 10, 10); g.fillStyle = cssVar('--muted'); g.fillText(label, x + 14, 114); x += g.measureText(label).width + 30;
+  });
+}
+
 export function drawMicro(canvas, rig, lanes) {
   const { g, w, h } = fitCanvas(canvas);
   if (!w) return;
+  if (rig === 'microwave') return energyPanel(g, w, lanes);
   const half = w / 2;
   lanes.forEach((lane, i) => {
     g.save(); g.beginPath(); g.rect(i * half, 0, half, h); g.clip();

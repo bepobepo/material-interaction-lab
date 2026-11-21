@@ -24,11 +24,11 @@
       <div id="presets"></div>
     </section>
     <section id="lanes"></section>
-    <p class="note">Values are realistic orders of magnitude tuned for a clear picture, not lab measurements.</p>
+    <p class="note" id="note">Values are realistic orders of magnitude tuned for a clear picture, not lab measurements.</p>
   </aside>
 
   <section id="stage">
-    <div id="view"><div id="fade"></div><div id="molOverlay" hidden></div></div>
+    <div id="view"><div id="fade"></div><div id="molOverlay" hidden></div><div id="heatScale" hidden></div></div>
     <div id="readouts"></div>
     <div id="controls">
       <button id="play" type="button">▶ Run test</button>
@@ -36,11 +36,16 @@
         <input id="slider" type="range" min="0" max="1000" value="0">
         <output id="controlValue">0°</output>
       </label>
-      <label class="check" title="On: Run test moves the control for you. Off: it stays where you set it and Run test just lets time pass."><input id="auto" type="checkbox" checked> <span id="autoName">Auto-tilt</span></label>
+      <label id="autoWrap" class="check" title="On: Run test moves the control for you. Off: it stays where you set it and Run test just lets time pass."><input id="auto" type="checkbox" checked> <span id="autoName">Auto-tilt</span></label>
       <label class="check" title="How fast time runs">Speed
         <select id="speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>
         <output id="clock">0.0 s</output>
       </label>
+      <label class="check" data-rig="microwave" title="Off: the food sits still in the oven's hot and cold spots" hidden><input id="turn" type="checkbox" checked> Turntable</label>
+      <label class="check" data-rig="microwave" title="Lower power switches the microwaves on and off" hidden>Power
+        <select id="power"><option value="1">High</option><option value="0.5">Medium</option><option value="0.3">Low</option></select>
+      </label>
+      <button id="stir" type="button" data-rig="microwave" title="Mix the food so its heat evens out" hidden>Stir</button>
       <label id="wetWrap" class="check" hidden><input id="wet" type="checkbox"> Wet surface</label>
       <button id="reset" type="button">Reset</button>
       <button id="zoom" type="button" title="Dive into the contact and watch the molecules">🔬 Zoom to molecules</button>
@@ -53,7 +58,7 @@
     <div id="molExplain" hidden></div>
     <h3 id="chartTitle">Measurement</h3>
     <canvas id="chart"></canvas>
-    <h3>Zoomed in on the contact</h3>
+    <h3 id="microTitle">Zoomed in on the contact</h3>
     <canvas id="micro"></canvas>
   </aside>
 </main>

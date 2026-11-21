@@ -73,7 +73,56 @@ function dragLane({ a, b, inter: I, result: r }) {
   return { headline, reasons: reasons.slice(0, 4) };
 }
 
+const mmss = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+const deg = (v) => Math.round(v) + ' °C';
+const absorbNow = (l) => l.a.loss * ((1 - l.result.frozen) + l.result.frozen * l.a.iceLoss);
+
+function microwaveLane({ a, b, inter: I, result: r }) {
+  const A = cap(short(a)), noun = b.noun, hasC = b.shape !== 'none', theC = 'A ' + low(b.name), reasons = [];
+  const pct = Math.round(a.water * 100), penCm = (a.pen * 100).toFixed(a.pen < 0.03 ? 1 : 0);
+  let headline;
+  if (r.phase === 'ready') headline = `${A} ${I.where}, starting at ${deg(I.start.T)}. Set the cook time and press Run.`;
+  else {
+    headline = `After ${mmss(r.t)} the middle is at ${deg(r.mid)} and the hottest part at ${deg(r.hot)} (average ${deg(r.avg)}).`;
+    if (r.frozen > 0.03) headline += ` About ${Math.round(r.frozen * 100)}% is still frozen.`;
+    if (hasC) headline += ` The ${noun} is at about ${deg(r.contAvg)}${r.contHot - r.contAvg > 12 ? `, and ${deg(r.contHot)} at its hottest` : ''}.`;
+    if (r.phase === 'standing') headline += ` The microwave stopped at ${mmss(r.cook)}; since then the heat has only been spreading out.`;
+  }
+  if (I.swapped) headline += ` (A liquid can't sit on its own, so it is in a glass bowl.)`;
+
+  if (I.frozen && (r.phase === 'ready' || r.frozen > 0.05)) reasons.push(`Microwaves heat food by twisting its <b>water molecules</b> back and forth. In ice the molecules are locked in place, so the frozen parts absorb only about ${+(a.iceLoss * 100).toPrecision(1)}% of what they will once thawed. The first spots to thaw suddenly absorb far more and race ahead of the rest.`);
+  else if (a.water === 0) reasons.push(`It contains no water. Microwaves heat by twisting <b>water molecules</b> back and forth, and oil molecules barely respond, so it absorbs about ${Math.round(1 / a.loss)}× less than water.`);
+  else if (a.rho * a.c < 1.2e6) reasons.push(`It is light and only about ${pct}% water, so there is very little to heat. Its temperature shoots up in seconds and the water steams off, which is why it turns tough.`);
+  else if (a.water < 0.3) reasons.push(`It is mostly sugar with about ${pct}% water. It still absorbs microwaves well and takes less energy per degree than water, so it gets very hot, past the boiling point of water.`);
+  else reasons.push(`It is about ${pct}% water${a.salty ? ' and salty' : ''}. Microwaves twist <b>water molecules</b> back and forth and that motion turns into heat, so it absorbs ${a.loss > 1.2 ? 'even more strongly than plain water' : a.loss < 0.9 ? 'well' : 'strongly'}.`);
+
+  if (a.pen >= 0.03) reasons.push(`Microwaves pass deep into it (about ${penCm} cm before they fade), so it warms fairly evenly from edge to middle.`);
+  else if (I.selfMix) reasons.push(`Microwaves only reach about ${penCm} cm in before they are used up, so the outside heats first. But it is a liquid: warm liquid moves and <b>stirs itself</b>, which carries heat to the middle${r.frozen > 0.05 ? ' once it has thawed' : ''}.`);
+  else reasons.push(`Microwaves only reach about ${penCm} cm in before they are used up. The middle has to wait for heat to creep inward, and it can't stir itself, so you get <b>hot edges and a cold middle</b>.`);
+
+  if (hasC) {
+    const got = r.split.food + r.split.cont, share = got > 0 ? Math.round(r.split.cont / got * 100) : null;
+    if (I.contAbsorbs) reasons.push(`${theC} <b>absorbs microwaves itself</b>${share !== null ? `: so far ${share}% of the absorbed energy went straight into the ${noun} instead of the food` : ''}.${I.frozen ? ` Frozen food takes up so little that the ${noun} gets a large share.` : ''}`);
+    else reasons.push(`${theC} lets microwaves pass through, so the ${noun} only warms where hot food touches it${r.phase !== 'ready' && r.contHot > r.mid + 10 ? `. The food's outer layer heats first and sits right against it, which is why the ${noun} can feel hotter than the middle of the food` : ''}.`);
+  }
+  if (!r.turntable) reasons.push(`The turntable is off, so the food sits still in the oven's <b>standing waves</b>: fixed hot and cold spots a few centimetres apart.`);
+  if (r.power < 1) reasons.push(`At ${Math.round(r.power * 100)}% power the oven switches the microwaves on and off. The pauses give heat more time to spread from hot spots to cold ones. That helps a little, but heat needs minutes, not seconds, to travel a centimetre through food.`);
+  const all = r.split.food + r.split.cont + r.split.lost;
+  if (all > 0 && r.split.lost / all > 0.4) reasons.push(`Only about ${Math.round((1 - r.split.lost / all) * 100)}% of the oven's output has been absorbed. This load can't soak it all up, and the rest keeps bouncing around the oven.`);
+  return { headline, reasons };
+}
+
 function compare(rig, [L0, L1]) {
+  if (rig === 'microwave') {
+    const r = [L0.result, L1.result], n = ['A', 'B'];
+    if (r[0].phase === 'ready') return `Press Run and watch where the heat goes.`;
+    const d = r[0].avg - r[1].avg, gap = [r[0].hot - r[0].mid, r[1].hot - r[1].mid], hi = d > 0 ? 0 : 1, ev = gap[0] < gap[1] ? 0 : 1;
+    let s = Math.abs(d) >= 8 ? `${n[hi]} is heating faster: its average is ${deg(r[hi].avg)}, against ${deg(r[1 - hi].avg)} for ${n[1 - hi]}.`
+      : Math.abs(gap[0] - gap[1]) < 6 ? `Both are heating at about the same rate.`
+      : `Both are at a similar average, but ${n[ev]} is more even: ${Math.round(gap[ev])}° between its hottest part and its middle, against ${Math.round(gap[1 - ev])}° in ${n[1 - ev]}.`;
+    [L0, L1].forEach((l, i) => { if (l.result.contAvg !== null && l.result.contAvg > l.result.avg + 10) s += ` In ${n[i]} the ${l.b.noun} is hotter than the food.`; });
+    return s;
+  }
   const n = [cap(short(L0.a)) + ' on ' + short(L0.b), short(L1.a) + ' on ' + short(L1.b)];
   if (rig === 'drag') {
     const [hi, lo, k] = L0.inter.muS >= L1.inter.muS ? [0, 1, L0.inter.muS / L1.inter.muS] : [1, 0, L1.inter.muS / L0.inter.muS];
@@ -96,6 +145,13 @@ function compare(rig, [L0, L1]) {
 
 function bars(rig, [L0, L1]) {
   const pair = (label, f, t) => ({ label, a: f(L0), b: f(L1), aText: t(L0), bText: t(L1) });
+  if (rig === 'microwave') return [
+    pair('Water content', (l) => c01(l.a.water), (l) => Math.round(l.a.water * 100) + '%'),
+    pair('Microwave absorption right now', (l) => logN(absorbNow(l), -2.6, 0.4), (l) => +absorbNow(l).toPrecision(2) + '× water'),
+    pair('How deep microwaves reach', (l) => c01(l.a.pen / 0.05), (l) => (l.a.pen * 100).toFixed(l.a.pen < 0.03 ? 1 : 0) + ' cm'),
+    pair('Heat spreading inside', (l) => logN(l.inter.spread, -1.2, 1.3), (l) => l.inter.selfMix ? 'stirs itself' : l.inter.spread > 0.4 ? 'slow' : 'very slow'),
+    pair('Container absorbs microwaves', (l) => c01(Math.sqrt((l.b.loss || 0) / 0.2)), (l) => l.b.shape === 'none' ? 'no container' : l.inter.contAbsorbs ? 'yes' : l.b.loss >= 0.005 ? 'slightly' : 'no'),
+  ];
   if (rig === 'drag') return [
     pair('Friction (static)', (l) => c01(l.inter.muS / 1.1), (l) => l.inter.muS.toFixed(2)),
     pair('Softness of the softer side', (l) => c01(l.inter.soft), (l) => l.inter.soft > 0.6 ? 'soft' : l.inter.soft > 0.15 ? 'medium' : 'hard'),
@@ -119,11 +175,11 @@ function bars(rig, [L0, L1]) {
 }
 
 export function explainHTML(rig, lanes) {
-  const fn = rig === 'drag' ? dragLane : rig === 'pull' ? pullLane : tiltLane;
+  const fn = rig === 'microwave' ? microwaveLane : rig === 'drag' ? dragLane : rig === 'pull' ? pullLane : tiltLane;
   let html = `<div class="compare">${compare(rig, lanes)}</div>`;
   lanes.forEach((l, i) => {
     const e = fn(l);
-    html += `<div class="card ${i ? 'b' : ''}"><h4>${i ? 'B' : 'A'} · ${l.a.name} on ${l.b.name}</h4><p>${e.headline}</p><ul>${e.reasons.map((x) => `<li>${x}</li>`).join('')}</ul></div>`;
+    html += `<div class="card ${i ? 'b' : ''}"><h4>${i ? 'B' : 'A'} · ${l.title}</h4><p>${e.headline}</p><ul>${e.reasons.map((x) => `<li>${x}</li>`).join('')}</ul></div>`;
   });
   html += `<h3>What drives it</h3><div class="bars">` + bars(rig, lanes).map((b) =>
     `<div class="bar"><div class="lbl"><span>${b.label}</span></div>

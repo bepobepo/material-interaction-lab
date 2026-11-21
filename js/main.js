@@ -8,6 +8,9 @@ import { PullRig } from './rigs/pull.js';
 import { DragRig } from './rigs/drag.js';
 import { drawChart, cssVar } from './ui/chart.js';
 import { drawMicro } from './ui/microview.js';
+import { MicrowaveRig } from './rigs/microwave.js';
+import { FOODS, CONTAINERS, STARTS } from './microwave/data.js';
+import { heatInteract, thermalCSS } from './microwave/model.js';
 import { MolecularView } from './molecular/view.js';
 import { molecularHTML } from './molecular/captions.js';
 
@@ -45,12 +48,28 @@ const RIGS = {
       { name: 'Rubber: glass vs stone (try wet)', lanes: [['rubber', 'glass'], ['rubber', 'stone']] },
     ],
   },
+  microwave: {
+    tab: 'Microwave', Rig: MicrowaveRig, control: 'Cook time', control0: 110 / 290, noSweep: true, noZoom: true, thermal: true,
+    slots: [['Food', FOODS], ['Container', CONTAINERS], ['Starts', STARTS]], inter: heatInteract,
+    speeds: [1, 2, 4, 8, 16, 32], speed: 8, maxStep: 0.25, microTitle: 'Where the microwave energy went', liveMicro: true,
+    blurb: 'Heat food in a microwave and see where the heat goes: into the food, the bowl, or nowhere.',
+    note: 'A simplified model. The pattern of hot and cold spots is illustrative (every real oven has its own), shapes are round and centred, and food values are typical figures. It shows why food heats unevenly, not exact cooking times.',
+    camera: [0, 3.3, 7.6], target: [0, 0.55, 0], fitWidth: 7,
+    presets: [
+      { name: 'Frozen soup: stoneware vs glass bowl', lanes: [['soup', 'stoneware', 'frozen'], ['soup', 'glass', 'frozen']] },
+      { name: 'Soup vs lasagne from the fridge', lanes: [['soup', 'glass', 'fridge'], ['lasagne', 'glass', 'fridge']] },
+      { name: 'Lasagne: frozen vs fridge-cold', lanes: [['lasagne', 'paper', 'frozen'], ['lasagne', 'paper', 'fridge']] },
+      { name: 'Water vs cooking oil', lanes: [['water', 'glass', 'room'], ['oil', 'glass', 'room']] },
+    ],
+  },
 };
+const NOTE = 'Values are realistic orders of magnitude tuned for a clear picture, not lab measurements.';
+const SPEEDS = [0.25, 0.5, 1, 2, 4, 8], speedName = (v) => (v === 0.25 ? '¼' : v === 0.5 ? '½' : v) + '×';
 
 const $ = (id) => document.getElementById(id);
 const el = { view: $('view'), tabs: $('tabs'), blurb: $('blurb'), presets: $('presets'), lanes: $('lanes'), readouts: $('readouts'), play: $('play'),
   slider: $('slider'), controlName: $('controlName'), controlValue: $('controlValue'), wetWrap: $('wetWrap'), wet: $('wet'), reset: $('reset'),
-  explain: $('explain'), chart: $('chart'), chartTitle: $('chartTitle'), micro: $('micro'), zoom: $('zoom'), auto: $('auto'), autoName: $('autoName'), speed: $('speed'), clock: $('clock'), fade: $('fade'), molOverlay: $('molOverlay'), molExplain: $('molExplain') };
+  explain: $('explain'), chart: $('chart'), chartTitle: $('chartTitle'), micro: $('micro'), zoom: $('zoom'), autoWrap: $('autoWrap'), turn: $('turn'), power: $('power'), stir: $('stir'), heatScale: $('heatScale'), microTitle: $('microTitle'), note: $('note'), auto: $('auto'), autoName: $('autoName'), speed: $('speed'), clock: $('clock'), fade: $('fade'), molOverlay: $('molOverlay'), molExplain: $('molExplain') };
 
 // ---- scene -----------------------------------------------------------------------------------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -90,12 +109,15 @@ new ResizeObserver(resize).observe(el.view);
 
 // ---- state -----------------------------------------------------------------------------------
 // playing: time is running · sweep: the control is being moved for us · auto: Run test sweeps the control · fresh: nothing has run since the last reset
-const state = { rigId: null, rig: null, lanes: [], inter: [], control: 0, playing: false, sweep: false, auto: true, fresh: true, speed: 1, clock: 0, wet: false, zoomed: false };
+const state = { rigId: null, rig: null, lanes: [], inter: [], control: 0, playing: false, sweep: false, auto: true, fresh: true, speed: 1, clock: 0, wet: false, zoomed: false, opts: { turntable: true, power: 1 } };
 const cfg = () => RIGS[state.rigId];
+const autoOn = () => state.auto && !cfg().noSweep;                                          // some rigs have nothing to sweep
+const slots = () => cfg().slots || [[cfg().aLabel, cfg().aSet], [cfg().bLabel, SOLIDS]];    // the pickers each lane has
+const pick = (i) => slots().map(([, set], k) => set[state.lanes[i][k]]);
 
 function computeInter(i) {
-  const [aId, bId] = state.lanes[i], a = cfg().aSet[aId], b = SOLIDS[bId];
-  state.inter[i] = state.rigId === 'drag' ? solidInteract(a, b, { wet: state.wet }) : wetInteract(a, b);
+  const [a, b, c] = pick(i);
+  state.inter[i] = cfg().inter ? cfg().inter(a, b, c) : state.rigId === 'drag' ? solidInteract(a, b, { wet: state.wet }) : wetInteract(a, b);
   state.rig.setPair(i, a, b, state.inter[i]);
 }
 function setControl(v) {
@@ -107,7 +129,7 @@ function setPlaying(p) {
   el.play.textContent = p ? '❚❚ Pause' : state.fresh ? '▶ Run test' : '▶ Resume';
 }
 function restart() {   // fresh sample; with auto off the control keeps the value the user chose
-  const keep = state.auto ? 0 : state.control;
+  const keep = autoOn() ? 0 : state.control;
   state.fresh = true; state.clock = 0; setPlaying(false); state.rig.reset(); setControl(keep); lastHTML = ''; if (state.zoomed) buildMol();
 }
 function applyPairs() { computeInter(0); computeInter(1); restart(); refreshStatic(); }
@@ -117,7 +139,7 @@ function buildLanes() {
   [0, 1].forEach((i) => {
     const box = document.createElement('div'); box.className = 'lane' + (i ? ' b' : '');
     box.innerHTML = `<h2>${i ? 'B' : 'A'}</h2>`;
-    [[cfg().aLabel, cfg().aSet, 0], [cfg().bLabel, SOLIDS, 1]].forEach(([label, set, slot]) => {
+    slots().forEach(([label, set], slot) => {
       const lab = document.createElement('label'); lab.textContent = label;
       const sel = document.createElement('select');
       for (const [id, m] of Object.entries(set)) sel.add(new Option(m.name, id));
@@ -132,8 +154,16 @@ function buildLanes() {
 function switchRig(id) {
   if (state.rig) { world.remove(state.rig.group); state.rig.dispose(); }
   state.rigId = id; const c = cfg();
+  if (c.noZoom && (state.zoomed || zoom.phase)) { showMol(false); zoom.phase = null; el.fade.style.opacity = 0; orbit.enabled = true; el.zoom.textContent = '🔬 Zoom to molecules'; }
   state.rig = new c.Rig(); world.add(state.rig.group);
-  state.lanes = c.presets[0].lanes.map((l) => [...l]); state.wet = false; el.wet.checked = false; state.control = 0;
+  if (state.rig.setOptions) state.rig.setOptions(state.opts);
+  el.speed.innerHTML = ''; (c.speeds || SPEEDS).forEach((v) => el.speed.add(new Option(speedName(v), v)));
+  state.speed = c.speed || 1; el.speed.value = state.speed;
+  el.autoWrap.hidden = !!c.noSweep; el.zoom.hidden = !!c.noZoom; el.heatScale.hidden = !c.thermal;
+  el.microTitle.textContent = c.microTitle || 'Zoomed in on the contact';
+  el.note.textContent = c.note || NOTE;
+  document.querySelectorAll('[data-rig]').forEach((e) => { e.hidden = e.dataset.rig !== id; });
+  state.lanes = c.presets[0].lanes.map((l) => [...l]); state.wet = false; el.wet.checked = false; state.control = c.control0 || 0;
   [...el.tabs.children].forEach((b) => b.setAttribute('aria-selected', b.dataset.id === id));
   el.blurb.textContent = c.blurb; el.controlName.textContent = c.control; el.autoName.textContent = c.auto; el.wetWrap.hidden = !c.wet;
   el.presets.innerHTML = '';
@@ -143,7 +173,12 @@ function switchRig(id) {
     el.presets.appendChild(b);
   });
   buildLanes(); applyPairs();
-  camera.position.set(...c.camera); orbit.target.set(...c.target); orbit.update();
+  camera.position.set(...c.camera); orbit.target.set(...c.target);
+  if (c.fitWidth) {   // on a narrow screen, step back far enough to keep both lanes in view
+    const need = c.fitWidth / (2 * Math.tan(camera.fov * Math.PI / 360) * camera.aspect), off = camera.position.clone().sub(orbit.target);
+    if (off.length() < need) camera.position.copy(orbit.target).add(off.setLength(Math.min(15.5, need)));
+  }
+  orbit.update();
   if (state.zoomed) markHome();
 }
 
@@ -153,11 +188,11 @@ for (const [id, c] of Object.entries(RIGS)) {
 }
 el.slider.addEventListener('input', () => {   // by hand: live in auto mode; with auto off and time stopped it only picks the value to hold
   state.sweep = false; setControl(el.slider.value / 1000);
-  if (state.auto && !state.playing) setPlaying(true);
+  if (autoOn() && !state.playing) setPlaying(true);
 });
 el.play.addEventListener('click', () => {
   if (state.playing) return setPlaying(false);
-  setPlaying(true); state.sweep = state.auto && state.control < 0.999;
+  setPlaying(true); state.sweep = autoOn() && state.control < 0.999;
 });
 el.auto.addEventListener('change', () => {
   state.auto = el.auto.checked;
@@ -167,20 +202,29 @@ el.auto.addEventListener('change', () => {
   refreshLive();
 });
 el.speed.addEventListener('change', () => { state.speed = +el.speed.value; });
+const setOpts = () => { state.opts.turntable = el.turn.checked; state.opts.power = +el.power.value; if (state.rig.setOptions) state.rig.setOptions(state.opts); lastHTML = ''; refreshLive(); };
+el.turn.addEventListener('change', setOpts); el.power.addEventListener('change', setOpts);
+el.stir.addEventListener('click', () => { if (state.rig.stir) { state.rig.stir(); refreshLive(); } });
+el.heatScale.innerHTML = `<div class="bar" style="background:${thermalCSS()}"></div><div class="ticks">` + [-18, 0, 20, 60, 100].map((t) => `<span style="left:${((t + 18) / 148 * 100).toFixed(1)}%">${t}${t === 100 ? ' °C' : ''}</span>`).join('') + '</div>';
 el.reset.addEventListener('click', restart);
 el.wet.addEventListener('change', () => { state.wet = el.wet.checked; applyPairs(); });
 
 // ---- panels ----------------------------------------------------------------------------------
 let lastHTML = '';
-const laneData = () => [0, 1].map((i) => ({ a: cfg().aSet[state.lanes[i][0]], b: SOLIDS[state.lanes[i][1]], inter: state.inter[i], result: state.rig.result(i) }));
+const laneData = () => [0, 1].map((i) => {
+  const [a, b] = pick(i), inter = state.inter[i];
+  return { a, b: inter.container || b, inter, result: state.rig.result(i), title: inter.title || `${a.name} on ${b.name}` };
+});
 function refreshStatic() { drawMicro(el.micro, state.rigId, laneData()); refreshLive(); }
 function refreshLive() {
   const data = laneData();
-  el.readouts.innerHTML = data.map((l, i) => `<div class="chip ${i ? 'b' : ''}"><b>${i ? 'B' : 'A'} · ${l.a.name} on ${l.b.name}</b><span>${state.rig.live(i)}</span></div>`).join('');
+  el.readouts.innerHTML = data.map((l, i) => `<div class="chip ${i ? 'b' : ''}"><b>${i ? 'B' : 'A'} · ${l.title}</b><span>${state.rig.live(i)}</span></div>`).join('');
   const html = explainHTML(state.rigId, data);
   if (html !== lastHTML) { el.explain.innerHTML = html; lastHTML = html; }
-  const tr = state.rig.trace(!state.auto); el.chartTitle.textContent = tr.title; drawChart(el.chart, tr);
-  el.clock.textContent = state.clock.toFixed(1) + ' s';
+  const tr = state.rig.trace(!autoOn()); el.chartTitle.textContent = tr.title; drawChart(el.chart, tr);
+  if (cfg().liveMicro) drawMicro(el.micro, state.rigId, data);
+  el.clock.textContent = state.clock < 60 ? state.clock.toFixed(1) + ' s' : Math.floor(state.clock / 60) + ':' + String(Math.floor(state.clock % 60)).padStart(2, '0');
+  el.stir.disabled = !data.some((l) => l.result.canStir);
 }
 window.addEventListener('resize', refreshStatic);
 
@@ -227,7 +271,7 @@ el.zoom.addEventListener('click', toggleZoom);
 let last = performance.now(), acc = 0;
 function advance(dt) {
   if (state.playing) {                 // simulated time = real time x speed, in steps no longer than one frame
-    const n = Math.ceil(state.speed), h = dt * state.speed / n;
+    const n = cfg().maxStep ? Math.ceil(dt * state.speed / cfg().maxStep) : Math.ceil(state.speed), h = dt * state.speed / n;
     for (let k = 0; k < n; k++) {
       if (state.sweep) { const v = Math.min(1, state.control + h / cfg().sweep); setControl(v); if (v >= 1) state.sweep = false; }
       state.rig.step(h);
