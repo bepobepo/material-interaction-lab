@@ -60,14 +60,14 @@ function wetPanel(g, x0, w, h, lane, seed, strands) {
 
 // Microwave tab: how the oven's output so far was shared between the food, its container, and nothing at all.
 function energyPanel(g, w, lanes) {
-  const x0 = 30, bw = w - x0 - 12, bh = 24, font = '-apple-system, Helvetica, Arial, sans-serif', grey = '#8b5cf6', pale = 'rgba(148,163,184,0.3)';
+  const x0 = 30, bw = w - x0 - 12, bh = 24, font = 'Nunito, Helvetica, Arial, sans-serif', grey = '#8b5cf6', pale = 'rgba(148,163,184,0.3)';
   g.textBaseline = 'middle';
   lanes.forEach((l, i) => {
     const y = 14 + i * 44, s = l.result.split, tot = s.food + s.cont + s.lost;
     g.fillStyle = LANE_COLORS[i]; g.font = 'bold 13px ' + font; g.textAlign = 'left'; g.fillText(i ? 'B' : 'A', 10, y + bh / 2);
     if (!tot) { g.strokeStyle = cssVar('--line'); g.strokeRect(x0, y, bw, bh); g.fillStyle = cssVar('--muted'); g.font = '11px ' + font; g.fillText('Press Run to see where the energy goes', x0 + 8, y + bh / 2); return; }
     let x = x0;
-    [[s.food, LANE_COLORS[i], '#fff'], [s.cont, grey, '#fff'], [s.lost, pale, cssVar('--ink')]].forEach(([v, fill, ink]) => {
+    [[s.food, LANE_COLORS[i], '#2c2144'], [s.cont, grey, '#fff'], [s.lost, pale, cssVar('--ink')]].forEach(([v, fill, ink]) => {
       const sw = bw * v / tot; g.fillStyle = fill; g.fillRect(x, y, sw, bh);
       if (sw > 30) { g.fillStyle = ink; g.font = '11px ' + font; g.textAlign = 'center'; g.fillText(Math.round(v / tot * 100) + '%', x + sw / 2, y + bh / 2); }
       x += sw;
@@ -87,9 +87,9 @@ export function drawMicro(canvas, rig, lanes) {
   lanes.forEach((lane, i) => {
     g.save(); g.beginPath(); g.rect(i * half, 0, half, h); g.clip();
     const note = rig === 'drag' ? solidPanel(g, i * half, half, h, lane, 1.7 + i * 3.1) : wetPanel(g, i * half, half, h, lane, 1.7 + i * 3.1, rig === 'pull');
-    g.fillStyle = LANE_COLORS[i]; g.font = 'bold 12px -apple-system, Helvetica, Arial, sans-serif'; g.textAlign = 'left'; g.textBaseline = 'top';
+    g.fillStyle = LANE_COLORS[i]; g.font = '800 12px Nunito, Helvetica, Arial, sans-serif'; g.textAlign = 'left'; g.textBaseline = 'top';
     g.fillText(i ? 'B' : 'A', i * half + 8, 6);
-    g.fillStyle = cssVar('--ink'); g.font = '11px -apple-system, Helvetica, Arial, sans-serif'; g.fillText(note, i * half + 22, 7);
+    g.fillStyle = cssVar('--ink'); g.font = '700 11px Nunito, Helvetica, Arial, sans-serif'; g.fillText(note, i * half + 22, 7);
     g.restore();
   });
   g.strokeStyle = cssVar('--line'); g.lineWidth = 1; g.beginPath(); g.moveTo(half, 0); g.lineTo(half, h); g.stroke();
