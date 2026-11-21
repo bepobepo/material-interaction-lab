@@ -74,7 +74,7 @@ const SPEEDS = [0.25, 0.5, 1, 2, 4, 8], speedName = (v) => (v === 0.25 ? '¼' : 
 const $ = (id) => document.getElementById(id);
 const el = { view: $('view'), tabs: $('tabs'), blurb: $('blurb'), presets: $('presets'), lanes: $('lanes'), readouts: $('readouts'), play: $('play'),
   slider: $('slider'), controlName: $('controlName'), controlValue: $('controlValue'), wetWrap: $('wetWrap'), wet: $('wet'), reset: $('reset'),
-  explain: $('explain'), chart: $('chart'), chartTitle: $('chartTitle'), micro: $('micro'), zoom: $('zoom'), autoWrap: $('autoWrap'), look: $('look'), lookSheet: $('lookSheet'), turn: $('turn'), tomato: $('tomato'), tomatoWrap: $('tomatoWrap'), power: $('power'), cut: $('cut'), heat: $('heat'), stir: $('stir'), heatScale: $('heatScale'), microTitle: $('microTitle'), note: $('note'), auto: $('auto'), autoName: $('autoName'), speed: $('speed'), clock: $('clock'), fade: $('fade'), molOverlay: $('molOverlay'), molExplain: $('molExplain') };
+  explain: $('explain'), chart: $('chart'), chartTitle: $('chartTitle'), micro: $('micro'), zoom: $('zoom'), autoWrap: $('autoWrap'), look: $('look'), lookSheet: $('lookSheet'), turn: $('turn'), tomato: $('tomato'), tomatoWrap: $('tomatoWrap'), power: $('power'), cut: $('cut'), heat: $('heat'), guide: $('viewGuide'), guideOpen: $('guideOpen'), guideClose: $('guideClose'), stir: $('stir'), heatScale: $('heatScale'), microTitle: $('microTitle'), note: $('note'), auto: $('auto'), autoName: $('autoName'), speed: $('speed'), clock: $('clock'), fade: $('fade'), molOverlay: $('molOverlay'), molExplain: $('molExplain') };
 
 // ---- scene -----------------------------------------------------------------------------------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -115,7 +115,7 @@ new ResizeObserver(resize).observe(el.view);
 
 // ---- state -----------------------------------------------------------------------------------
 // playing: time is running · sweep: the control is being moved for us · auto: Run test sweeps the control · fresh: nothing has run since the last reset
-const state = { rigId: null, rig: null, lanes: [], inter: [], control: 0, playing: false, sweep: false, auto: true, fresh: true, speed: 1, clock: 0, wet: false, zoomed: false, opts: { turntable: true, power: 1, cut: true, heat: true, perceived: false } };
+const state = { rigId: null, rig: null, lanes: [], inter: [], control: 0, playing: false, sweep: false, auto: true, fresh: true, speed: 1, clock: 0, wet: false, zoomed: false, opts: { turntable: true, power: 1, cut: false, heat: false, perceived: false } };
 const cfg = () => RIGS[state.rigId];
 const autoOn = () => state.auto && !cfg().noSweep;                                          // some rigs have nothing to sweep
 const slots = () => cfg().slots || [[cfg().aLabel, cfg().aSet], [cfg().bLabel, SOLIDS]];    // the pickers each lane has
@@ -175,6 +175,7 @@ function switchRig(id, keep) {   // keep: rebuild the same experiment with the v
   el.microTitle.textContent = c.microTitle || 'Zoomed in on the contact';
   el.note.textContent = c.note || NOTE;
   document.querySelectorAll('[data-rig]').forEach((e) => { e.hidden = e.dataset.rig !== id; });
+  showGuide(id === 'microwave' && !guideSeen());
   if (!keep) { state.lanes = c.presets[0].lanes.map((l) => [...l]); state.wet = false; el.wet.checked = false; state.control = c.control0 || 0; }
   [...el.tabs.children].forEach((b) => b.setAttribute('aria-selected', b.dataset.id === id));
   el.blurb.textContent = c.blurb; el.controlName.textContent = c.control; el.autoName.textContent = c.auto; el.wetWrap.hidden = !c.wet;
@@ -216,7 +217,14 @@ el.auto.addEventListener('change', () => {
   refreshLive();
 });
 el.speed.addEventListener('change', () => { state.speed = +el.speed.value; });
-const setOpts = () => { Object.assign(state.opts, { turntable: el.turn.checked, power: +el.power.value, cut: el.cut.checked, heat: el.heat.checked, perceived: el.tomato.value === 'perceived' }); el.heatScale.hidden = !cfg().thermal || !state.opts.heat; if (state.rig.setOptions) state.rig.setOptions(state.opts); lastHTML = ''; refreshLive(); };
+// The Microwave tab opens showing the food as it really looks; this card explains the two view switches until the visitor closes it
+const guideSeen = () => { try { return localStorage.getItem('mwGuide') === 'seen'; } catch (e) { return false; } };
+const syncGuide = () => el.guide.querySelectorAll('[data-for]').forEach((b) => { const on = el[b.dataset.for].checked; b.textContent = on ? 'Turn off' : 'Turn on'; b.setAttribute('aria-pressed', on); });
+function showGuide(show) { el.guide.hidden = !show; el.guideOpen.setAttribute('aria-expanded', show); if (show) syncGuide(); }
+el.guide.querySelectorAll('[data-for]').forEach((b) => b.addEventListener('click', () => { const box = el[b.dataset.for]; box.checked = !box.checked; box.dispatchEvent(new Event('change')); }));
+el.guideClose.addEventListener('click', () => { try { localStorage.setItem('mwGuide', 'seen'); } catch (e) { } showGuide(false); });
+el.guideOpen.addEventListener('click', () => showGuide(el.guide.hidden));
+const setOpts = () => { Object.assign(state.opts, { turntable: el.turn.checked, power: +el.power.value, cut: el.cut.checked, heat: el.heat.checked, perceived: el.tomato.value === 'perceived' }); el.heatScale.hidden = !cfg().thermal || !state.opts.heat; if (state.rig.setOptions) state.rig.setOptions(state.opts); syncGuide(); lastHTML = ''; refreshLive(); };
 [el.turn, el.power, el.cut, el.heat, el.tomato].forEach((e) => e.addEventListener('change', setOpts));
 el.stir.addEventListener('click', () => { if (state.rig.stir) { state.rig.stir(); refreshLive(); } });
 el.heatScale.innerHTML = `<div class="bar" style="background:${thermalCSS()}"></div><div class="ticks">` + [-18, 0, 20, 60, 100].map((t) => `<span style="left:${((t + 18) / 148 * 100).toFixed(1)}%">${t}${t === 100 ? ' °C' : ''}</span>`).join('') + '</div><div class="key">Food: full colour · Container: its own colour, tinted by its heat</div>';

@@ -209,7 +209,7 @@ class Lane {
     const ftex = flameTexture(); this.flames = [];
     for (let k = 0; k < FLAMES; k++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: ftex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false })); s.visible = false; s.renderOrder = 5; this.root.add(s); this.flames.push(s); }
     this.heated = 0; this.perceived = false;
-    this.skins = []; this.marks = []; this.tex = []; this.t = 0; this.glow = 0; this.view = { cut: true, heat: true };
+    this.skins = []; this.marks = []; this.tex = []; this.t = 0; this.glow = 0; this.view = { cut: false, heat: false };
   }
   texture(canvas, colour) {
     const t = new THREE.CanvasTexture(canvas); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
@@ -281,7 +281,7 @@ export class MicrowaveRig {
   constructor() {
     this.group = new THREE.Group();
     this.lanes = [new Lane(0), new Lane(1)]; this.lanes.forEach((l) => this.group.add(l.root));
-    this.cook = 120; this.clock = 0; this.acc = 0; this.on = false; this.opts = { turntable: true, power: 1, cut: true, heat: true, perceived: false };
+    this.cook = 120; this.clock = 0; this.acc = 0; this.on = false; this.opts = { turntable: true, power: 1, cut: false, heat: false, perceived: false };
     this.traces = [[], []]; this.extra = [[], []];
   }
   setPair(i, a, b, inter) { this.lanes[i].setPair(a, inter); }
