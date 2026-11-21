@@ -6,7 +6,7 @@ import { LANE_COLORS, makeLabel, disposeGroup } from './common.js';
 import { HeatField, thermal, fieldAt, DX, PERIOD } from '../microwave/model.js';
 import { foodLook, containerDetail, EXTENT, TALL } from '../microwave/looks.js';
 
-const LANE_X = [-0.148, 0.148], CW = 0.26, CH = 0.16, CD = 0.26, T_LO = -20, T_HI = 130, LUT_N = 300, STEAM = 10, TAU = Math.PI * 2;
+const LANE_X = [-0.148, 0.148], CW = 0.26, CH = 0.16, CD = 0.26, T_LO = -20, T_HI = 130, LUT_N = 300, STEAM = 10, FLAMES = 14, TAU = Math.PI * 2;
 const CUT = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);     // keeps the half away from the viewer
 const mmss = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
 const cookSeconds = (v) => 10 + Math.round(v * 290 / 5) * 5;
@@ -36,15 +36,15 @@ class Skin {
     this.mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, toneMapped: false, map: this.look.heat }));
     return this.mesh;
   }
-  paint(field, heat) {
+  paint(field, heat, fire) {
     const c = this.col.array, p = this.pts, n = this.shade.length, food = this.kind === 1, own = this.look.col, gain = heat ? this.look.gain : 1;
     for (let i = 0; i < n; i++) {
-      const T = field.sample(p[i * 3], p[i * 3 + 1], p[i * 3 + 2], this.kind, this.local);
+      const T = fire && food ? 1000 : field.sample(p[i * 3], p[i * 3 + 1], p[i * 3 + 2], this.kind, this.local);
       let r = 1, g = 1, b = 1;
       if (heat) { const k = Math.max(0, Math.min(LUT_N - 1, Math.round((T - T_LO) / (T_HI - T_LO) * (LUT_N - 1)))) * 3; r = LUT[k]; g = LUT[k + 1]; b = LUT[k + 2]; }
       if (!food) { const t = heat ? TINT : 0; r = r * t + own[0] * (1 - t); g = g * t + own[1] * (1 - t); b = b * t + own[2] * (1 - t); }
       else if (!heat && field.iceOut > 0) { const f = FROST * field.iceOut; r += (ICE[0] - r) * f; g += (ICE[1] - g) * f; b += (ICE[2] - b) * f; }
-      const s = this.shade[i] * gain; c[i * 3] = r * s; c[i * 3 + 1] = g * s; c[i * 3 + 2] = b * s;
+      const s = this.shade[i] * gain * (fire && food && !heat ? 0.22 : 1); c[i * 3] = r * s; c[i * 3 + 1] = g * s; c[i * 3 + 2] = b * s;
     }
     this.col.needsUpdate = true;
   }
@@ -110,7 +110,7 @@ class CutFace extends Skin {
     this.line = new THREE.Line(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array((2 * this.NU + 1) * 3), 3)), new THREE.LineBasicMaterial({ color: 0x0f172a, transparent: true, opacity: 0.7 }));
     this.line.frustumCulled = false; return m;
   }
-  paint(field, heat) {
+  paint(field, heat, fire) {
     const { reg, p, NU, NV, pts } = this, c = field.cosT, s = field.sinT, o = [0, 0], W = 0.092, N = 64, pos = this.posA.array, uv = this.uvA.array, ln = this.line.geometry.attributes.position;
     const hit = (x) => reg.col(p, x * c, -x * s, o);          // the point at x along the cut, in the food's own frame
     let xa = null, xb = null;
@@ -131,7 +131,7 @@ class CutFace extends Skin {
     }
     ln.setXYZ(2 * NU, ln.getX(0), ln.getY(0), 0.0004);
     this.posA.needsUpdate = this.uvA.needsUpdate = ln.needsUpdate = true;
-    super.paint(field, heat);
+    super.paint(field, heat, fire);
   }
 }
 
@@ -163,6 +163,13 @@ function spotTexture() {   // where the oven's field is strong, at food height
     img.data[k] = 255; img.data[k + 1] = 120; img.data[k + 2] = 30; img.data[k + 3] = 255 * Math.pow(v, 1.4);
   }
   g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function flameTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), gr = g.createRadialGradient(32, 40, 2, 32, 34, 30);
+  gr.addColorStop(0, 'rgba(255,250,200,1)'); gr.addColorStop(0.35, 'rgba(255,190,40,0.95)'); gr.addColorStop(0.7, 'rgba(240,80,10,0.6)'); gr.addColorStop(1, 'rgba(200,30,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 function steamTexture() {
@@ -199,6 +206,9 @@ class Lane {
     const label = makeLabel(i ? 'B' : 'A', LANE_COLORS[i]); label.position.set(-CW / 2 + 0.02, CH + 0.025, -CD / 2); this.root.add(label);
     const tex = steamTexture(); this.steam = [];
     for (let k = 0; k < STEAM; k++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false })); s.visible = false; s.renderOrder = 4; this.root.add(s); this.steam.push(s); }
+    const ftex = flameTexture(); this.flames = [];
+    for (let k = 0; k < FLAMES; k++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: ftex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false })); s.visible = false; s.renderOrder = 5; this.root.add(s); this.flames.push(s); }
+    this.heated = 0; this.perceived = false;
     this.skins = []; this.marks = []; this.tex = []; this.t = 0; this.glow = 0; this.view = { cut: true, heat: true };
   }
   texture(canvas, colour) {
@@ -239,7 +249,7 @@ class Lane {
     if (this.field) this.paint();
   }
   paint() {
-    for (const s of this.skins) if (s.mesh.visible) s.paint(this.field, this.view.heat);
+    for (const s of this.skins) if (s.mesh.visible) s.paint(this.field, this.view.heat, this.fire);
     this.table.rotation.y = this.body.rotation.y = -this.field.theta;
   }
   draw(dt, on) {
@@ -252,33 +262,45 @@ class Lane {
       s.position.set(Math.sin(k * 2.4 + p * 3) * 0.02 + (k % 3 - 1) * 0.012, top + 0.006 + p * 0.08, -0.012 - (k % 4) * 0.008);
       s.scale.setScalar(0.022 + 0.035 * p); s.material.opacity = 0.5 * Math.sin(Math.PI * p);
     });
+    // the perceived tomato on fire: flames over every piece, following it round the turntable
+    const P = this.field.shape.food.pieces, c = this.field.cosT, sn = this.field.sinT, burning = this.fire;
+    this.flames.forEach((s, k) => {
+      s.visible = burning; if (!burning) return;
+      const p = P[k % P.length], q = (this.t * (1.1 + 0.13 * (k % 5)) + k * 0.37) % 1, a = k * 2.1, r = 0.022 * ((k * 7 % 10) / 10);
+      const X = p.x + r * Math.cos(a), Y = p.y + r * Math.sin(a);
+      s.position.set(X * c - Y * sn, top - 0.012 + q * 0.07, X * sn + Y * c + 0.004);
+      const w = 0.05 * (1 - 0.6 * q) * (0.8 + 0.2 * Math.sin(this.t * 17 + k)); s.scale.set(w, w * 1.7, 1); s.material.opacity = 0.9 * Math.min(1, q * 6) * (1 - q);
+    });
     this.paint();
   }
+  // Perceived mode: after 30 s of heating the tomato is, as far as your mouth can tell, on fire.
+  get fire() { return this.perceived && this.field.food.id === 'tomato' && this.heated >= 30; }
 }
 
 export class MicrowaveRig {
   constructor() {
     this.group = new THREE.Group();
     this.lanes = [new Lane(0), new Lane(1)]; this.lanes.forEach((l) => this.group.add(l.root));
-    this.cook = 120; this.clock = 0; this.acc = 0; this.on = false; this.opts = { turntable: true, power: 1, cut: true, heat: true };
+    this.cook = 120; this.clock = 0; this.acc = 0; this.on = false; this.opts = { turntable: true, power: 1, cut: true, heat: true, perceived: false };
     this.traces = [[], []]; this.extra = [[], []];
   }
   setPair(i, a, b, inter) { this.lanes[i].setPair(a, inter); }
   setOptions(o) {
     Object.assign(this.opts, o);
+    this.lanes.forEach((l) => { if (l.perceived !== !!this.opts.perceived) { l.perceived = !!this.opts.perceived; if (l.field) l.draw(0, this.on); } });
     this.lanes.forEach((l) => { if (l.view.cut !== this.opts.cut || l.view.heat !== this.opts.heat) l.setView(this.opts); });
   }
   setControl(v) { this.cook = cookSeconds(v); }
   controlLabel(v) { return mmss(cookSeconds(v)); }
   reset() {
     this.clock = 0; this.acc = 0; this.on = false; this.traces = [[], []]; this.extra = [[], []];
-    this.lanes.forEach((l) => { if (!l.field) return; l.field.reset(); l.glow = 0; l.draw(0, false); });
+    this.lanes.forEach((l) => { if (!l.field) return; l.field.reset(); l.glow = 0; l.heated = 0; l.draw(0, false); });
     this.record();
   }
   record() {
     this.lanes.forEach((l, i) => {
       if (!l.field) return; const s = l.field.s;
-      this.traces[i].push({ x: this.clock, y: s.avg }); if (s.contAvg !== null) this.extra[i].push({ x: this.clock, y: s.contAvg });
+      this.traces[i].push({ x: this.clock, y: l.fire ? 1000 : s.avg }); if (s.contAvg !== null) this.extra[i].push({ x: this.clock, y: s.contAvg });
       if (this.traces[i].length > 2400) { this.traces[i] = this.traces[i].filter((p, k) => k % 2 === 0); this.extra[i] = this.extra[i].filter((p, k) => k % 2 === 0); }
     });
   }
@@ -286,22 +308,23 @@ export class MicrowaveRig {
     const cooking = this.clock < this.cook, p = this.opts.power;
     this.on = cooking && (p >= 1 || (this.clock % PERIOD) < PERIOD * p);     // lower power = the same magnetron, pulsed
     this.clock += dt;
-    this.lanes.forEach((l) => { l.field.step(dt, this.on, cooking && this.opts.turntable); l.draw(dt, this.on); });
+    this.lanes.forEach((l) => { if (cooking) l.heated += dt; l.field.step(dt, this.on, cooking && this.opts.turntable); l.draw(dt, this.on); });     // heated counts cooking time at any power level
     this.acc += dt; if (this.acc >= 1) { this.acc = 0; this.record(); }
   }
   stir() { this.lanes.forEach((l) => { l.field.stir(); l.paint(); }); }
   result(i) {
-    const f = this.lanes[i].field, E = f.E;
-    return { ...f.s, t: this.clock, cook: this.cook, phase: this.clock === 0 ? 'ready' : this.clock < this.cook ? 'cooking' : 'standing', on: this.on,
+    const l = this.lanes[i], f = l.field, E = f.E, fire = l.fire;
+    return { ...f.s, ...(fire ? { avg: 1000, mid: 1000, hot: 1000, cold: 1000, frozen: 0 } : {}), fire, perceived: l.perceived && f.food.id === 'tomato', t: this.clock, cook: this.cook, phase: this.clock === 0 ? 'ready' : this.clock < this.cook ? 'cooking' : 'standing', on: this.on,
       split: { food: E.food, cont: E.cont, lost: E.lost }, steam: E.steam, turntable: this.opts.turntable, power: this.opts.power, canStir: f.food.stir };
   }
   focus() { return new THREE.Vector3(0, 0.04, 0); }
   live(i) {
     const r = this.result(i), d = (v) => Math.round(v) + ' °C', noun = this.lanes[i].field.cont.noun;
+    if (r.fire) return `🔥 On fire · ${d(1000)}` + (r.contAvg !== null ? ` · ${noun} ${d(r.contAvg)}` : '');
     return `Middle ${d(r.mid)} · hottest ${d(r.hot)}` + (r.contAvg !== null ? ` · ${noun} ${d(r.contAvg)}` : '') + (r.frozen > 0.03 ? ` · ${Math.round(r.frozen * 100)}% frozen` : '');
   }
   trace() {
-    return { title: 'Temperature over time (solid: food average · dashed: container)', x: 'time (s)', y: '°C', xMax: Math.max(120, Math.ceil(Math.max(this.clock, this.cook) / 60) * 60), yMin: -20, yMax: 100, series: this.traces, extra: this.extra };
+    return { title: 'Temperature over time (solid: food average · dashed: container)', x: 'time (s)', y: '°C', xMax: Math.max(120, Math.ceil(Math.max(this.clock, this.cook) / 60) * 60), yMin: -20, yMax: this.lanes.some((l) => l.fire) ? 1000 : 100, series: this.traces, extra: this.extra };
   }
   dispose() { this.lanes.forEach((l) => l.clear()); disposeGroup(this.group); }
 }

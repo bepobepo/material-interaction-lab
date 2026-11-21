@@ -62,6 +62,7 @@ const RIGS = {
       { name: 'Soup: a little vs a lot', lanes: [['soup', 150, 'glass', 'fridge'], ['soup', 450, 'glass', 'fridge']] },
       { name: 'Bread rolls: one vs four', lanes: [['bread', 1, 'paper', 'room'], ['bread', 4, 'paper', 'room']] },
       { name: 'Half a chicken vs a pizza slice', lanes: [['chicken', 0.5, 'porcelain', 'fridge'], ['pizza', 1, 'paper', 'fridge']] },
+      { name: 'Tomato vs potato', lanes: [['tomato', 1, 'paper', 'fridge'], ['potato', 1, 'paper', 'fridge']] },
       { name: 'Water vs cooking oil', lanes: [['water', 300, 'glass', 'room'], ['oil', 300, 'glass', 'room']] },
     ],
   },
@@ -72,7 +73,7 @@ const SPEEDS = [0.25, 0.5, 1, 2, 4, 8], speedName = (v) => (v === 0.25 ? '¼' : 
 const $ = (id) => document.getElementById(id);
 const el = { view: $('view'), tabs: $('tabs'), blurb: $('blurb'), presets: $('presets'), lanes: $('lanes'), readouts: $('readouts'), play: $('play'),
   slider: $('slider'), controlName: $('controlName'), controlValue: $('controlValue'), wetWrap: $('wetWrap'), wet: $('wet'), reset: $('reset'),
-  explain: $('explain'), chart: $('chart'), chartTitle: $('chartTitle'), micro: $('micro'), zoom: $('zoom'), autoWrap: $('autoWrap'), turn: $('turn'), power: $('power'), cut: $('cut'), heat: $('heat'), stir: $('stir'), heatScale: $('heatScale'), microTitle: $('microTitle'), note: $('note'), auto: $('auto'), autoName: $('autoName'), speed: $('speed'), clock: $('clock'), fade: $('fade'), molOverlay: $('molOverlay'), molExplain: $('molExplain') };
+  explain: $('explain'), chart: $('chart'), chartTitle: $('chartTitle'), micro: $('micro'), zoom: $('zoom'), autoWrap: $('autoWrap'), turn: $('turn'), tomato: $('tomato'), tomatoWrap: $('tomatoWrap'), power: $('power'), cut: $('cut'), heat: $('heat'), stir: $('stir'), heatScale: $('heatScale'), microTitle: $('microTitle'), note: $('note'), auto: $('auto'), autoName: $('autoName'), speed: $('speed'), clock: $('clock'), fade: $('fade'), molOverlay: $('molOverlay'), molExplain: $('molExplain') };
 
 // ---- scene -----------------------------------------------------------------------------------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -113,7 +114,7 @@ new ResizeObserver(resize).observe(el.view);
 
 // ---- state -----------------------------------------------------------------------------------
 // playing: time is running · sweep: the control is being moved for us · auto: Run test sweeps the control · fresh: nothing has run since the last reset
-const state = { rigId: null, rig: null, lanes: [], inter: [], control: 0, playing: false, sweep: false, auto: true, fresh: true, speed: 1, clock: 0, wet: false, zoomed: false, opts: { turntable: true, power: 1, cut: true, heat: true } };
+const state = { rigId: null, rig: null, lanes: [], inter: [], control: 0, playing: false, sweep: false, auto: true, fresh: true, speed: 1, clock: 0, wet: false, zoomed: false, opts: { turntable: true, power: 1, cut: true, heat: true, perceived: false } };
 const cfg = () => RIGS[state.rigId];
 const autoOn = () => state.auto && !cfg().noSweep;                                          // some rigs have nothing to sweep
 const slots = () => cfg().slots || [[cfg().aLabel, cfg().aSet], [cfg().bLabel, SOLIDS]];    // the pickers each lane has
@@ -137,7 +138,9 @@ function restart() {   // fresh sample; with auto off the control keeps the valu
   const keep = autoOn() ? 0 : state.control;
   state.fresh = true; state.clock = 0; setPlaying(false); state.rig.reset(); setControl(keep); lastHTML = ''; if (state.zoomed) buildMol();
 }
-function applyPairs() { computeInter(0); computeInter(1); restart(); refreshStatic(); }
+function applyPairs() {
+  el.tomatoWrap.hidden = !(state.rigId === 'microwave' && state.lanes.some((l) => l[0] === 'tomato'));   // the Real / Perceived choice is only for tomatoes
+  computeInter(0); computeInter(1); restart(); refreshStatic(); }
 
 function buildLanes() {
   el.lanes.innerHTML = '';
@@ -209,8 +212,8 @@ el.auto.addEventListener('change', () => {
   refreshLive();
 });
 el.speed.addEventListener('change', () => { state.speed = +el.speed.value; });
-const setOpts = () => { Object.assign(state.opts, { turntable: el.turn.checked, power: +el.power.value, cut: el.cut.checked, heat: el.heat.checked }); el.heatScale.hidden = !cfg().thermal || !state.opts.heat; if (state.rig.setOptions) state.rig.setOptions(state.opts); lastHTML = ''; refreshLive(); };
-[el.turn, el.power, el.cut, el.heat].forEach((e) => e.addEventListener('change', setOpts));
+const setOpts = () => { Object.assign(state.opts, { turntable: el.turn.checked, power: +el.power.value, cut: el.cut.checked, heat: el.heat.checked, perceived: el.tomato.value === 'perceived' }); el.heatScale.hidden = !cfg().thermal || !state.opts.heat; if (state.rig.setOptions) state.rig.setOptions(state.opts); lastHTML = ''; refreshLive(); };
+[el.turn, el.power, el.cut, el.heat, el.tomato].forEach((e) => e.addEventListener('change', setOpts));
 el.stir.addEventListener('click', () => { if (state.rig.stir) { state.rig.stir(); refreshLive(); } });
 el.heatScale.innerHTML = `<div class="bar" style="background:${thermalCSS()}"></div><div class="ticks">` + [-18, 0, 20, 60, 100].map((t) => `<span style="left:${((t + 18) / 148 * 100).toFixed(1)}%">${t}${t === 100 ? ' °C' : ''}</span>`).join('') + '</div><div class="key">Food: full colour · Container: its own colour, tinted by its heat</div>';
 el.reset.addEventListener('click', restart);

@@ -65,6 +65,8 @@ const PIECES = {
     top: (x, y, s) => 0.005 + 0.041 * Math.max(0, 1 - s * s) ** 0.42, bot: (x, y, s) => 0.005 * s ** 4 })),
   potato: (q, e) => ring(e.n, 0.043, 0.031, e.lim).map((p) => ({ ...p, rigid: true, out: oval(0.043, 0.031, (a) => 1 + 0.06 * Math.sin(2 * a + 0.7) + 0.045 * Math.sin(3 * a + 2)),
     top: (x, y, s) => 0.024 + 0.028 * (1 + 2.8 * x) * root(1 - s * s), bot: (x, y, s) => 0.024 * (1 - root(1 - s * s)) })),
+  tomato: (q, e) => ring(e.n, 0.034, 0.034, e.lim).map((p) => ({ ...p, rigid: true, out: oval(0.034, 0.034, (a) => 1 + 0.03 * Math.cos(5 * a)),
+    top: (x, y, s) => 0.026 + 0.029 * root(1 - s * s) * (1 - 0.1 * Math.exp(-s * s / 0.05)), bot: (x, y, s) => 0.026 * (1 - root(1 - s * s)) })),   // a dimple where the stalk was
   egg: (q, e) => ring(e.n, 0.029, 0.0215, e.lim).map((p) => ({ ...p, rigid: true, out: oval(0.029, 0.0215, (a) => 1 + 0.22 * Math.cos(a) * Math.sin(a) ** 2),
     top: (x, y, s) => 0.0204 + 0.0215 * (1 + 3.4 * x) * root(1 - s * s), bot: (x, y, s) => 0.0204 * (1 - root(1 - s * s)) })),
   pizza: (q, e) => {

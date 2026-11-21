@@ -73,6 +73,20 @@ const PAINT = {
     scatter(g, R, 70, 3.5, 1.5, '#3f6a2a'); g.restore();
   },
   pizzaSide(g, R) { base(g, '#e6c88f'); scatter(g, R, 120, 5, 3, ['#c9a566', '#bb9658'], { vary: 0.6 }); g.fillStyle = '#b53a1d'; g.fillRect(0, 102, 256, 5); g.fillStyle = '#f0c75c'; g.fillRect(0, 98, 256, 5); },
+  tomato(g, R) {    // shiny red skin with the green stalk scar in the middle
+    base(g, '#d42a1c'); scatter(g, R, 10, 40, 26, '#e8503a', { alpha: 0.45 });
+    g.fillStyle = '#3f7a2a'; g.strokeStyle = '#2c5a1c'; g.lineWidth = 1.5; g.beginPath();
+    for (let k = 0; k < 10; k++) { const a = Math.PI * k / 5, r = k % 2 ? 6 : 19; g.lineTo(128 + r * Math.cos(a), 128 + r * Math.sin(a)); }
+    g.closePath(); g.fill(); g.stroke();
+  },
+  tomatoSide(g) {   // flesh, a pale core and two seed pockets
+    base(g, '#e2452c'); const cy = 128 - 0.026 / TALL * 128;
+    g.fillStyle = '#f0907a'; g.beginPath(); g.ellipse(128, cy, 9, 30, 0, 0, Math.PI * 2); g.fill();
+    for (const sx of [-1, 1]) {
+      g.fillStyle = '#f2b23c'; g.beginPath(); g.ellipse(128 + sx * 24, cy, 12, 24, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#f7e6a8'; for (let k = 0; k < 5; k++) { g.beginPath(); g.ellipse(128 + sx * (20 + (k % 2) * 8), cy - 16 + k * 8, 2.5, 4, 0, 0, Math.PI * 2); g.fill(); }
+    }
+  },
   egg(g) { base(g, '#f6f1e6'); },
   eggSide(g) {      // the yolk, in the middle of the egg
     base(g, '#f6f1e6'); g.fillStyle = '#eda91f'; g.strokeStyle = '#c98510'; g.lineWidth = 2;

@@ -86,6 +86,8 @@ function microwaveLane({ a, b, inter: I, result: r }) {
     headline = `After ${mmss(r.t)} the middle is at ${deg(r.mid)} and the hottest part at ${deg(r.hot)} (average ${deg(r.avg)}).`;
     if (r.frozen > 0.03) headline += ` About ${Math.round(r.frozen * 100)}% is still frozen.`;
     if (hasC) headline += ` The ${noun} is at about ${deg(r.contAvg)}${r.contHot - r.contAvg > 12 ? `, and ${deg(r.contHot)} at its hottest` : ''}.`;
+    if (r.fire) headline = `After ${mmss(r.t)} the tomato is <b>on fire at ${deg(1000)}</b>. That is how it feels when you bite into it; switch to Real to see how hot it actually is.`;
+    else if (r.perceived) headline += ` (Perceived mode: wait until it has had 30 seconds.)`;
     if (r.phase === 'standing') headline += ` The microwave stopped at ${mmss(r.cook)}; since then the heat has only been spreading out.`;
   }
   if (I.swapped) headline += ` (A liquid can't sit on its own, so it is in a glass bowl.)`;
