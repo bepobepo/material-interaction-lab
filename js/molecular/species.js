@@ -11,15 +11,15 @@ export const SUB_RECIPES = {
              blurb: 'Short fatty chains that barely attract each other and slip past one another.' },
   honey:   { parts: [{ kind: 'ring', frac: 0.7, color: C.SUGAR, label: 'sugar ring' }, WATER],
              blurb: 'Packed with sugar rings, each hydrogen-bonded to several neighbours, so everything moves slowly.' },
-  yogurt:  { parts: [{ kind: 'cluster', frac: 0.28, color: C.PROT, net: 4.7, label: 'milk protein clump' }, WATER],
-             blurb: 'Water trapped in a loose net of milk-protein clumps. The net holds its shape until it is forced to give.' },
+  yogurt:  { parts: [{ kind: 'cluster', frac: 0.4, color: C.PROT, net: 4.7, label: 'milk protein clump (not to scale)' }, WATER],
+             blurb: 'Water trapped in a loose net of milk-protein clumps. The net holds its shape until it is forced to give. Real clumps are hundreds of times wider than a water molecule.' },
   ketchup: { parts: [{ kind: 'chain', n: 12, r: 0.42, cls: POLAR, color: C.FIBRE, frac: 0.3, stiff: true, label: 'plant fibre' }, WATER],
              blurb: 'Water threaded with long plant fibres that tangle into a weak net.' },
-  peanut:  { parts: [{ kind: 'ball', frac: 0.5, color: C.NUT, net: 2.7, label: 'peanut particle' }, { kind: 'chain', n: 5, r: 0.44, cls: OILY, color: C.FAT, frac: 1, label: 'fat chain' }],
-             blurb: 'Solid peanut particles jammed together in oil; they have to shove past each other to move.' },
-  taffy:   { parts: [{ kind: 'chain', n: 14, r: 0.44, cls: POLAR, color: C.TAFFY, frac: 0.45, label: 'syrup chain' }, { kind: 'ring', frac: 1, color: C.SUGAR, label: 'sugar ring' }],
+  peanut:  { parts: [{ kind: 'ball', frac: 0.5, color: C.NUT, net: 2.7, label: 'peanut particle (not to scale)' }, { kind: 'chain', n: 5, r: 0.44, cls: OILY, color: C.FAT, frac: 1, label: 'fat chain' }],
+             blurb: 'Solid peanut particles jammed together in oil; they have to shove past each other to move. Real particles are thousands of times bigger than drawn.' },
+  taffy:   { parts: [{ kind: 'chain', n: 14, r: 0.44, cls: POLAR, color: C.TAFFY, frac: 0.45, fold: 3, label: 'syrup chain' }, { kind: 'ring', frac: 1, color: C.SUGAR, label: 'sugar ring' }],
              blurb: 'Densely packed sugar with chains that tangle, stick, and stretch before they let go.' },
-  gum:     { parts: [{ kind: 'chain', n: 26, r: 0.46, cls: OILY, color: C.GUM, frac: 1, label: 'gum polymer chain' }],
+  gum:     { parts: [{ kind: 'chain', n: 26, r: 0.46, cls: OILY, color: C.GUM, frac: 1, fold: 3, label: 'gum polymer chain' }],
              blurb: 'Very long rubbery chains tangled together; they stretch a long way and hold on to each other.' },
 };
 
@@ -124,43 +124,62 @@ const MAKE = {
   ball(sim, x, y, a, z, p, centres) { const m = sim.newMol(true); centres.push(sim.add(x, y, { r: 0.85, cls: POLAR, grp: G_SUB, color: p.color, mol: m, z })); },
 };
 
+const NUDGE = [[0, 0.3], [0, -0.3], [0.3, 0], [-0.3, 0], [0, 0.6], [0, -0.6], [0.6, 0], [-0.6, 0], [0.45, 0.45], [-0.45, 0.45], [0.45, -0.45], [-0.45, -0.45]];
 // Fill the region `inside(x, y, clearance)` with the parts, largest first, on jittered hex grids.
 export function fillParts(sim, parts, inside, box, rng, vertical = false) {
   const start = sim.n, legend = [], nets = []; let mols = 0;
-  const clash = (px, py, s) => {
-    for (let j = start; j < sim.n; j++) { const dx = sim.x[j] - px, dy = sim.y[j] - py, d = s + sim.r[j] * 0.9; if (dx * dx + dy * dy < d * d) return true; }
+  let own = start;                                                         // where the ingredient being placed begins
+  const clash = (px, py, s, end) => {                                      // only earlier ingredients can be in the way: the grid already spaces an ingredient from itself
+    for (let j = start; j < end; j++) { const dx = sim.x[j] - px, dy = sim.y[j] - py, d = s + sim.r[j] * 0.9; if (dx * dx + dy * dy < d * d) return true; }
     return false;
   };
-  for (const p of parts) {
+  parts.forEach((p, pi) => {
     const size = SIZE[p.kind] || p.r, pitch = size * (p.kind === 'chain' ? 1.95 : 2.08), rowH = pitch * 0.88, centres = [];
-    let left = 0, prev = -1, pp = -1, m = -1, zc = 0, row = 0, skip = 0;
-    legend.push({ color: p.color, label: p.label });
+    let left = 0, prev = -1, pp = -1, m = -1, zc = 0, skip = 0, quota = rng();
+    legend.push({ color: p.color, label: p.label }); own = sim.n;
     const o0 = vertical ? box.x0 : box.y0, o1 = vertical ? box.x1 : box.y1, i0 = vertical ? box.y0 : box.x0, i1 = vertical ? box.y1 : box.x1;
-    for (let oo = o0 + size; oo < o1; oo += rowH, row++) {
-      const cells = []; for (let ii = i0 + size + (row & 1 ? pitch / 2 : 0); ii <= i1 - size; ii += pitch) cells.push(ii);
-      if (row & 1) cells.reverse();                                       // snake, so chains carry on into the next row
-      for (const ii of cells) {
+    // The order the places are visited in. It snakes, so a chain carries on from one row into the next. A long flexible
+    // chain (fold: 3) zigzags along a band three rows deep instead: a loose coil that can open out when it is pulled.
+    const rows = [], path = [], fold = p.fold || 1, cols = Math.floor((i1 - i0 - 2 * size) / pitch) + 1;
+    for (let oo = o0 + size; oo < o1; oo += rowH) rows.push(oo);
+    for (let band = 0; band * fold < rows.length; band++) for (let n = 0; n < cols; n++) {
+      const c = band & 1 ? cols - 1 - n : n, r0 = band * fold, r1 = Math.min(rows.length, r0 + fold);
+      for (let q = 0; q < r1 - r0; q++) {
+        const r = n & 1 ? r1 - 1 - q : r0 + q, ii = i0 + size + (r & 1 ? pitch / 2 : 0) + c * pitch;
+        if (ii <= i1 - size) path.push(rows[r], ii);
+      }
+    }
+    {
+      for (let q = 0; q < path.length; q += 2) {
+        const oo = path[q], ii = path[q + 1];
         if (sim.n > sim.cap - 40) break;
-        const px = (vertical ? oo : ii) + (rng() - 0.5) * 0.1, py = (vertical ? ii : oo) + (rng() - 0.5) * 0.1;
-        if (!inside(px, py, size) || clash(px, py, size)) { left = 0; continue; }
+        let px = (vertical ? oo : ii) + (rng() - 0.5) * 0.1, py = (vertical ? ii : oo) + (rng() - 0.5) * 0.1;
+        let ok = inside(px, py, size) && !clash(px, py, size, own);
+        if (!ok && own > start && p.kind !== 'chain') for (const [ax, ay] of NUDGE) {   // a later ingredient shuffles sideways into the pockets left by the earlier ones
+          if (inside(px + ax, py + ay, size) && !clash(px + ax, py + ay, size, sim.n)) { px += ax; py += ay; ok = true; break; }
+        }
+        if (!ok) continue;
         if (p.kind === 'chain') {
+          if (left > 0 && Math.hypot(sim.x[prev] - px, sim.y[prev] - py) > pitch * 1.5) left = 0;   // something is in the way: the chain ends here
           if (left === 0) {
             if (skip > 0) { skip--; continue; }
-            if (rng() > p.frac) { skip = p.n - 1; continue; }             // leave room for the other ingredients
-            m = sim.newMol(false); mols++; left = p.n; prev = pp = -1; zc = (rng() - 0.5) * 0.9;
+            quota += p.frac; if (quota < 1) { skip = p.n - 1; continue; }   // leave room for the other ingredients
+            quota -= 1;
+            m = sim.newMol(false); sim.kind[m] = pi; sim.area[m] = pitch * rowH; mols++; left = p.n; prev = pp = -1; zc = (rng() - 0.5) * 0.9;
           }
           const i = sim.add(px, py, { r: p.r, cls: p.cls, grp: G_SUB, color: p.color, mol: m, z: zc });
           if (prev >= 0) sim.bond(prev, i, p.r * 1.75, 80);
           if (p.stiff && pp >= 0) sim.bond(pp, i, p.r * 3.45, 25);
           pp = prev; prev = i; left--;
         } else {
-          if (rng() > p.frac) continue;
-          mols++; MAKE[p.kind](sim, px, py, rng() * 6.283, (rng() - 0.5) * 0.9, p, centres);
+          quota += p.frac; if (quota + (p.frac < 1 ? (rng() - 0.5) * 0.9 : 0) < 1) continue;   // random place by place, but an even share overall, so a minor ingredient is spread through the whole sample
+          quota -= 1; mols++; MAKE[p.kind](sim, px, py, rng() * 6.283, (rng() - 0.5) * 0.9, p, centres);
+          sim.kind[sim.rigid.length - 1] = pi; sim.area[sim.rigid.length - 1] = pitch * rowH;
         }
       }
     }
     if (p.net) nets.push([centres, p.net]);
-  }
+  });
   for (const [centres, reach] of nets) {                                  // weak links between neighbours: a gel network (added last so it can be cut)
     if (sim.netStart < 0) sim.netStart = sim.bonds.length;
     for (let a = 0; a < centres.length; a++) for (let b = a + 1; b < centres.length; b++) {

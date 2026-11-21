@@ -40,8 +40,9 @@ function pullLane({ a, b, inter: I, result: r }) {
   if (I.failure === 'cohesive') reasons.push(`It grips ${B} harder than it holds itself together (<b>adhesion beats cohesion</b>). The weak point is inside the material, so it tears there and both sides stay coated.`);
   else reasons.push(`It holds itself together better than it grips ${B} (<b>cohesion beats adhesion</b>). The weak point is the contact, so it lets go of the surface and comes away whole.`);
 
-  if (a.stringiness > 0.5) reasons.push(`It is made of long, tangled molecules. Pulling drags them past each other instead of snapping them, so it draws out into <b>strands</b> and keeps resisting over a long distance.`);
-  else if (a.stringiness < 0.15 && a.viscosity < 1) reasons.push(`Its molecules are small and slide freely, so the bridge thins and pinches off almost immediately.`);
+  if (a.stringiness > 0.5 && a.longChains) reasons.push(`It is made of long, tangled molecules. Pulling drags them past each other instead of snapping them, so it draws out into <b>strands</b> and keeps resisting over a long distance.`);
+  else if (a.stringiness > 0.5) reasons.push(`Its molecules are small, but they cling to each other and move slowly. The bridge cannot thin and pinch off quickly, so it draws out into a long <b>thread</b> first.`);
+  else if (a.stringiness < 0.15 && a.viscosity < 1 && !a.yieldStress) reasons.push(`Its molecules are small and slide freely, so the bridge thins and pinches off almost immediately.`);
   else reasons.push(`It is thick but not stretchy. The bridge necks down and breaks after a short pull.`);
 
   if (b.surfaceEnergy < 22) reasons.push(`${cap(B)} has very <b>low surface energy</b>: its molecules barely attract anything, so even tacky materials get little hold.`);

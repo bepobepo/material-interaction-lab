@@ -3,6 +3,7 @@
 // polar: the share of that surface tension or energy that comes from polar attraction (hydrogen bonds and the like);
 // the rest is the weak attraction every molecule has. Water is mostly polar, oil and Teflon hardly at all.
 // cohesion, tack, stringiness, roughness, softness, porosity: 0..1 relative scales.
+// longChains: stretchy because its molecules are long and tangled. Honey is stringy too, but only because it is thick: its molecules are small.
 
 export const SUBSTANCES = {
   water:   { name: 'Water',         viscosity: 0.001, yieldStress: 0,   surfaceTension: 72, polar: 0.70, cohesion: 0.01, tack: 0.02, stringiness: 0.02, density: 1000, look: { color: 0x4aa8f0, opacity: 0.6,  roughness: 0.05 } },
@@ -11,8 +12,8 @@ export const SUBSTANCES = {
   yogurt:  { name: 'Yogurt',        viscosity: 1,     yieldStress: 22,  surfaceTension: 50, polar: 0.55, cohesion: 0.2,  tack: 0.3,  stringiness: 0.1,  density: 1050, look: { color: 0xf7f3ea, opacity: 1,    roughness: 0.45 } },
   ketchup: { name: 'Ketchup',       viscosity: 0.8,   yieldStress: 14,  surfaceTension: 50, polar: 0.55, cohesion: 0.18, tack: 0.25, stringiness: 0.08, density: 1100, look: { color: 0xb3261e, opacity: 1,    roughness: 0.3 } },
   peanut:  { name: 'Peanut butter', viscosity: 30,    yieldStress: 300, surfaceTension: 35, polar: 0.05, cohesion: 0.5,  tack: 0.6,  stringiness: 0.15, density: 1090, look: { color: 0xb07a3b, opacity: 1,    roughness: 0.6 } },
-  taffy:   { name: 'Taffy',         viscosity: 5000,  yieldStress: 0,   surfaceTension: 45, polar: 0.30, cohesion: 0.8,  tack: 0.9,  stringiness: 0.9,  density: 1300, look: { color: 0xf2a7c3, opacity: 1,    roughness: 0.35 } },
-  gum:     { name: 'Chewing gum',   viscosity: 20000, yieldStress: 0,   surfaceTension: 40, polar: 0.10, cohesion: 0.95, tack: 0.6,  stringiness: 1.0,  density: 1200, look: { color: 0x9ad6c0, opacity: 1,    roughness: 0.4 } },
+  taffy:   { name: 'Taffy',         viscosity: 5000,  yieldStress: 0,   surfaceTension: 45, polar: 0.30, cohesion: 0.8,  tack: 0.9,  stringiness: 0.9,  longChains: true, density: 1300, look: { color: 0xf2a7c3, opacity: 1,    roughness: 0.35 } },
+  gum:     { name: 'Chewing gum',   viscosity: 20000, yieldStress: 0,   surfaceTension: 40, polar: 0.10, cohesion: 0.95, tack: 0.6,  stringiness: 1.0,  longChains: true, density: 1200, look: { color: 0x9ad6c0, opacity: 1,    roughness: 0.4 } },
 };
 
 export const SOLIDS = {

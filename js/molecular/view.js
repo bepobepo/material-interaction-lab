@@ -7,7 +7,7 @@ import { stateLine, countsLine } from './captions.js';
 import { hex } from '../materials.js';
 
 const BG = 0x0b1020, FOV = 20, ELEV = 9 * Math.PI / 180, NM = 3.3, FLOOR = -3.6;
-const IDEAL = { tilt: 3, drag: 3, pull: 1.05 }, HNEED = { tilt: 15, drag: 15, pull: 27 };
+const IDEAL = { tilt: 3, drag: 3, pull: 1.05 }, HNEED = { tilt: 15, drag: 15, pull: 36 }, MARGIN = 7.5;   // pull: tall enough to keep both surfaces in view when a stringy bridge is fully stretched
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const sphere = new THREE.SphereGeometry(1, 16, 12);
 const tmpColor = new THREE.Color();
@@ -70,6 +70,8 @@ class LaneScene {
     const take = (s) => { this.statics.push(...s.statics); this.decos.push(...s.decos); note(s.legend); return s; };
     const bot = take(buildSurface(sim, b, { W, base: 0, dir: 1, grp: G_SURF, rng, depth: true, minAmp: rigId === 'drag' ? 1 : 0 }));   // even 'smooth' solids have atomic steps
 
+    sim.floor = Float32Array.from(bot.h, (h) => h * 0.87 + 0.35);
+
     if (rigId === 'drag') {
       const film = I.wet ? 1.3 * (1 - Math.min(1, I.drain)) : 0;
       this.ampSum = bot.amp + Math.max(1, ampRows(a)); this.yT = this.ampSum * 0.87 + 1.0 + film;
@@ -120,11 +122,11 @@ class LaneScene {
       const start = sim.n;
       const info = fillSubstance(sim, a, inside, box, rng, pull); note(info.legend); sim.alive = info.mols;
       if (pull) {                                                          // remember where each molecule sits in the bridge
-        const M = this.M = { cx, hw: 0.3 * W, ids: [], t: [], u: [], lo: [], hi: [], half: [] };
+        const M = this.M = { cx, hw: 0.3 * W, ids: [], t: [], u: [], lo: [], hi: [], half: [], q: [] };
         for (let i = start; i < sim.n; i++) {
           const m = sim.mol[i]; if (sim.cls[i] === HYD || (sim.rigid[m] && i !== sim.molFirst[m])) continue;
           const lo = bot.topY(sim.x[i]) + 0.9, hi = this.top.topY(sim.x[i]) - 0.9;
-          M.ids.push(i); M.t.push(clamp((sim.y[i] - lo) / (hi - lo), 0, 1)); M.u.push(clamp((sim.x[i] - cx) / M.hw, -1, 1)); M.lo.push(lo); M.hi.push(hi); M.half.push(0);
+          M.ids.push(i); M.t.push(clamp((sim.y[i] - lo) / (hi - lo), 0, 1)); M.u.push(clamp((sim.x[i] - cx) / M.hw, -1, 1)); M.lo.push(lo); M.hi.push(hi); M.half.push(1); M.q.push(0);
           const n = sim.rigid[m] ? sim.molCount[m] : 1; sim.tk[i] = 4 * n; sim.tcap[i] = 4 * n;   // one handle moves the whole molecule
         }
       }
@@ -132,6 +134,13 @@ class LaneScene {
     }
     this.n0 = sim.alive;
     this.makeMeshes();
+    if (rigId === 'tilt') {            // let the sample settle first: it is laid out on a grid, a little looser than it ends up, and would otherwise start with gaps and pieces hanging in the air
+      const keep = [sim.gy, sim.gamma];
+      sim.gy = -1.5; sim.gamma = 1.5; sim.sq = 0.03;
+      for (let k = 0; k < 360; k++) sim.step(DT, false);
+      [sim.gy, sim.gamma] = keep; sim.sq = 0;
+      for (let i = 0; i < sim.n; i++) sim.vx[i] = sim.vy[i] = 0;
+    }
     for (let k = 0; k < 60; k++) sim.step(DT, k === 59);
     sim.flashes.length = 0;
     this.sync();
@@ -162,21 +171,34 @@ class LaneScene {
       if (moving && s.netStart >= 0) this.cutNet();
     } else if (this.rigId === 'pull') {
       const lam = r.sep / 0.6, bs = I.breakStretch, fB = 1.5 + 2.2 * clamp((bs - 1.8) / 36, 0, 1);
-      const target = -0.6 + this.g0 * ((fB - 1) * clamp((lam - 1) / (bs - 1), 0, 1) + (r.broken ? Math.min(1.2, 0.25 + (lam - bs) / bs * 3) : 0));
+      const room = this.maxH ? this.maxH - MARGIN - this.yT : Infinity;   // the top surface never leaves the picture, so what stays on it can be seen
+      const target = Math.min(room, -0.6 + this.g0 * ((fB - 1) * clamp((lam - 1) / (bs - 1), 0, 1) + (r.broken ? Math.min(1.2, 0.25 + (lam - bs) / bs * 3) : 0)));
       s.off[5] += (target - s.off[5]) * Math.min(1, dt * 10);
       const M = this.M, H0 = this.H0, coh = r.mode === 'cohesive';
       if (r.broken && !this.broken) {
         this.broken = true; this.rel = 0; this.fBreak = (H0 + s.off[5]) / H0;
-        const A0 = 2 * M.hw * H0; this.wd = (coh ? 0.8 : 0.9) * M.hw; this.hd = 3 * A0 / ((coh ? 8 : 4) * this.wd);
-        if (coh) {                                                         // tears through the middle: each molecule goes with its half
-          for (let k = 0; k < M.ids.length; k++) {
-            const m = s.mol[M.ids[k]]; let sum = 0, n = 0;
-            if (s.rigid[m]) { sum = M.t[k]; n = 1; } else for (let q = 0; q < M.ids.length; q++) if (s.mol[M.ids[q]] === m) { sum += M.t[q]; n++; }
-            M.half[k] = sum / n < 0.5 ? 1 : 2;
-            for (let q = s.molFirst[m], e = q + s.molCount[m]; q < e; q++) s.side[q] = M.half[k];
+        const N = M.ids.length, molOf = (k) => s.mol[M.ids[k]];
+        if (coh) {                                                         // tears through the middle. A tear leaves the same mix on both sides,
+          const mean = new Map(), kinds = new Map(), half = new Map();     // so each ingredient is shared out: its lower molecules stay down, its upper ones go up
+          for (let k = 0; k < N; k++) { const e = mean.get(molOf(k)) || [0, 0]; e[0] += M.t[k]; e[1]++; mean.set(molOf(k), e); }
+          for (const [m, e] of mean) { const kd = s.kind[m]; if (!kinds.has(kd)) kinds.set(kd, []); kinds.get(kd).push([e[0] / e[1], m]); }
+          for (const list of kinds.values()) {
+            list.sort((p, q) => p[0] - q[0]);
+            const n = list.length, low = n % 2 ? (n - 1) / 2 + (list[(n - 1) / 2][0] < 0.5 ? 1 : 0) : n / 2;
+            list.forEach(([, m], idx) => half.set(m, idx < low ? 1 : 2));
           }
+          for (let k = 0; k < N; k++) { const m = molOf(k); M.half[k] = half.get(m); for (let q = s.molFirst[m], e = q + s.molCount[m]; q < e; q++) s.side[q] = M.half[k]; }
           this.cutNet();
         } else s.topAdh = 0;                                               // lets go of the top surface
+        // Each part settles into a mound on its own surface, packed as closely as it started, so nothing is left hanging in the gap.
+        this.wd = (coh ? 0.8 : 0.9) * M.hw; this.hd = [0, 0, 0];
+        for (const h of [1, 2]) {
+          const idx = []; for (let k = 0; k < N; k++) if (M.half[k] === h) idx.push(k);
+          idx.sort((p, q) => (h === 1 ? M.t[p] - M.t[q] : M.t[q] - M.t[p]));   // nearest its surface first
+          let A = 0, acc = 0; for (const k of idx) A += s.area[molOf(k)];
+          for (const k of idx) { const a = s.area[molOf(k)]; M.q[k] = (acc + a / 2) / A; acc += a; }
+          this.hd[h] = 0.75 * A / this.wd;
+        }
       }
       const f = this.broken ? this.fBreak : Math.max(0.6, (H0 + s.off[5]) / H0), S = bridgeShape(M.hw, f), tab = cumulative((q) => bridgeW(S, q));
       if (this.broken) this.rel = Math.min(1, this.rel + dt / 0.9);
@@ -185,8 +207,8 @@ class LaneScene {
         const i = M.ids[k], t = M.t[k], u = M.u[k], lo = M.lo[k], hi = M.hi[k] + s.off[5], tau = invert(tab, t);
         let tx = M.cx + u * bridgeW(S, tau), ty = lo + tau * (hi - lo);
         if (e > 0) {
-          const up = coh && M.half[k] === 2, q = coh ? (up ? (1 - t) * 2 : t * 2) : t, sg = invert(DOME, clamp(q, 0, 1));
-          const dx = M.cx + u * this.wd * (1 - sg * sg), dy = up ? hi - sg * this.hd : lo + sg * this.hd;
+          const up = M.half[k] === 2, sg = invert(DOME, M.q[k]), hd = this.hd[M.half[k]];
+          const dx = M.cx + u * this.wd * (1 - sg * sg), dy = up ? hi - sg * hd : lo + sg * hd;
           tx += (dx - tx) * e; ty += (dy - ty) * e;
         }
         s.ax[i] = tx; s.ay[i] = ty;
@@ -243,9 +265,9 @@ class LaneScene {
 
   // point the camera at the action; returns the height of the framed region in sim units
   frame(aspect) {
-    const maxH = (this.W - 3) / aspect; let fh = maxH, cy;
+    const maxH = this.maxH = (this.W - 3) / aspect; let fh = maxH, cy;
     if (this.rigId === 'pull') {
-      const top = this.yT + this.sim.off[5], want = Math.min(maxH, Math.max(13, top + 7.5));
+      const top = this.yT + this.sim.off[5], want = Math.min(maxH, Math.max(13, top + MARGIN));
       this.fh = this.fh ? this.fh + (want - this.fh) * 0.12 : want; fh = this.fh; cy = top / 2;
     } else cy = this.rigId === 'drag' ? Math.max(FLOOR + fh / 2, this.yT / 2 + 1.3) : FLOOR + fh / 2;   // drag: keep the interface in the middle
     const dist = fh / 2 / Math.tan(FOV * Math.PI / 360), cx = this.W / 2 + Math.sin(this.t * 0.35) * 0.5;

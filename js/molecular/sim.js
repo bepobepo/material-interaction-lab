@@ -15,9 +15,12 @@ export class Sim {
     this.cls = u(); this.grp = u(); this.tg = u(); this.side = u(); this.active = u(); this.hide = u();
     this.col = new Uint32Array(CAP); this.mol = new Int32Array(CAP).fill(-1);
     this.rigid = []; this.molFirst = []; this.molCount = [];
+    this.kind = []; this.area = [];                           // per molecule: which ingredient it is, and the room one of its handles takes up
     this.bonds = []; this.netStart = -1;                       // flat list: i, j, rest length, stiffness
     this.eps = new Float32Array(NC * NC); this.link = new Uint8Array(NC * NC);
     this.kT = 0.3; this.gamma = 2; this.gx = 0; this.gy = 0; this.load = 0; this.topAdh = 1;
+    this.floor = null;                                         // per column: the lowest a substance bead may sit, so nothing ends up inside the solid below
+    this.sq = 0; this.cx = W / 2;                              // settling only: a gentle squeeze of the substance towards the middle
     this.off = [0, 0, 0, 0, 0, 0];                             // anchor offset (x, y) per group
     this.nx = Math.max(3, Math.floor(W / CELL)); this.cw = W / this.nx; this.ny = Math.ceil((yMax - yMin) / CELL) + 1;
     this.head = new Int32Array(this.nx * this.ny); this.next = new Int32Array(CAP);
@@ -43,7 +46,7 @@ export class Sim {
     for (let i = 0; i < n; i++) {
       if (!active[i]) continue;
       const g = grp[i]; let Fx = 0, Fy = 0;
-      if (g === G_SUB) { Fx = this.gx; Fy = this.gy; }
+      if (g === G_SUB) { Fx = this.gx; Fy = this.gy; if (this.sq) Fx -= this.sq * (x[i] - this.cx); }
       else if (g === G_TOP) Fy = -this.load;
       const k = tk[i];
       if (k) {
@@ -106,7 +109,7 @@ export class Sim {
       }
     }
     // integrate with a Langevin thermostat
-    const gam = this.gamma, sig = Math.sqrt(2 * gam * this.kT * dt), lo = this.yMin + 0.5, hi = this.yMax - 0.5;
+    const gam = this.gamma, sig = Math.sqrt(2 * gam * this.kT * dt), lo = this.yMin + 0.5, hi = this.yMax - 0.5, floor = this.floor;
     for (let i = 0; i < n; i++) {
       if (!active[i]) continue;
       const sub = grp[i] === G_SUB, tame = sub ? 1 : 0.5;
@@ -121,6 +124,7 @@ export class Sim {
         x[i] -= W;
       } else if (x[i] < 0) x[i] += W;
       if (y[i] < lo) { y[i] = lo; vy[i] = 0; } else if (y[i] > hi) { y[i] = hi; vy[i] = 0; }
+      if (sub && floor) { const c = Math.round(x[i] - 0.5), f = floor[c < 0 ? c + W : c >= W ? c - W : c]; if (y[i] < f) { y[i] = f; if (vy[i] < 0) vy[i] = 0; } }
     }
     if (collect) {
       const keys = new Set(); let fresh = 0;

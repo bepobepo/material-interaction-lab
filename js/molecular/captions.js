@@ -13,10 +13,11 @@ export function stateLine(rigId, lane) {
   }
   if (rigId === 'pull') {
     if (r.broken) return r.mode === 'cohesive'
-      ? 'The surfaces held on harder than the molecules hold each other, so it tore and left some on both.'
-      : 'The molecules held each other harder than the surface held them, so it let go cleanly.';
+      ? 'Each molecule grips the surface harder than it grips its neighbours, so the tear ran through the middle and left some on both.'
+      : 'The molecules grip each other harder than the surface grips them, so it let go of one surface cleanly.';
     if (r.sep < 0.75) return 'Squashed together: the molecules settle onto both surfaces.';
-    return a.stringiness > 0.4 ? 'Long chains uncoil and line up, bridging the gap.' : 'Small molecules cannot bridge far, so the bridge thins quickly.';
+    if (a.stringiness > 0.4) return a.longChains ? 'Long chains uncoil and line up, bridging the gap.' : 'The molecules are small but slow to let go of each other, so the bridge draws out into a thread.';
+    return a.yieldStress ? 'The loose net gives way early, so the bridge thins quickly.' : 'Small molecules cannot bridge far, so the bridge thins quickly.';
   }
   const water = I.wet && I.wetFactor < 0.8 ? ' Water molecules wedged in between keep the surfaces apart.' : '';
   if (r.force < 0.05) return (I.soft > 0.6 ? 'Resting: the soft block has moulded itself into the bumps.' : 'Resting: only the high points of the two surfaces touch.') + water;
@@ -36,5 +37,5 @@ export function molecularHTML(rigId, lanes) {
     const top = rigId === 'drag' ? SOLID_RECIPES[l.a.id].blurb : SUB_RECIPES[l.a.id].blurb;
     const same = rigId === 'drag' && l.a.id === l.b.id;
     return `<div class="card ${i ? 'b' : ''}"><h4>${i ? 'B' : 'A'} · ${l.a.name} on ${lc(l.b.name)}</h4><ul>${item(l.a, top)}${same ? '' : item(l.b, SOLID_RECIPES[l.b.id].blurb)}</ul></div>`;
-  }).join('') + '<p class="note">A stylised slice a few nanometres wide. Shapes are simplified, motion is slowed enormously and forces are exaggerated so you can see them.</p>';
+  }).join('') + '<p class="note">A stylised slice a few nanometres wide. Shapes are simplified, motion is slowed enormously and forces are exaggerated so you can see them. Larger pieces, such as protein clumps and peanut particles, are drawn far smaller than they really are.</p>';
 }
