@@ -7,6 +7,7 @@ import { TiltRig } from './rigs/tilt.js';
 import { PullRig } from './rigs/pull.js';
 import { DragRig } from './rigs/drag.js';
 import { drawChart, cssVar } from './ui/chart.js';
+import { syncLook, LOOK } from './rigs/common.js';
 import { drawMicro } from './ui/microview.js';
 import { MicrowaveRig } from './rigs/microwave.js';
 import { FOODS, CONTAINERS, STARTS, amountSet } from './microwave/data.js';
@@ -73,7 +74,7 @@ const SPEEDS = [0.25, 0.5, 1, 2, 4, 8], speedName = (v) => (v === 0.25 ? '¼' : 
 const $ = (id) => document.getElementById(id);
 const el = { view: $('view'), tabs: $('tabs'), blurb: $('blurb'), presets: $('presets'), lanes: $('lanes'), readouts: $('readouts'), play: $('play'),
   slider: $('slider'), controlName: $('controlName'), controlValue: $('controlValue'), wetWrap: $('wetWrap'), wet: $('wet'), reset: $('reset'),
-  explain: $('explain'), chart: $('chart'), chartTitle: $('chartTitle'), micro: $('micro'), zoom: $('zoom'), autoWrap: $('autoWrap'), turn: $('turn'), tomato: $('tomato'), tomatoWrap: $('tomatoWrap'), power: $('power'), cut: $('cut'), heat: $('heat'), stir: $('stir'), heatScale: $('heatScale'), microTitle: $('microTitle'), note: $('note'), auto: $('auto'), autoName: $('autoName'), speed: $('speed'), clock: $('clock'), fade: $('fade'), molOverlay: $('molOverlay'), molExplain: $('molExplain') };
+  explain: $('explain'), chart: $('chart'), chartTitle: $('chartTitle'), micro: $('micro'), zoom: $('zoom'), autoWrap: $('autoWrap'), look: $('look'), lookSheet: $('lookSheet'), turn: $('turn'), tomato: $('tomato'), tomatoWrap: $('tomatoWrap'), power: $('power'), cut: $('cut'), heat: $('heat'), stir: $('stir'), heatScale: $('heatScale'), microTitle: $('microTitle'), note: $('note'), auto: $('auto'), autoName: $('autoName'), speed: $('speed'), clock: $('clock'), fade: $('fade'), molOverlay: $('molOverlay'), molExplain: $('molExplain') };
 
 // ---- scene -----------------------------------------------------------------------------------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -161,19 +162,20 @@ function buildLanes() {
   });
 }
 
-function switchRig(id) {
+function switchRig(id, keep) {   // keep: rebuild the same experiment with the visitor's choices left as they are
   if (state.rig) { world.remove(state.rig.group); state.rig.dispose(); }
   state.rigId = id; const c = cfg();
   if (c.noZoom && (state.zoomed || zoom.phase)) { showMol(false); zoom.phase = null; el.fade.style.opacity = 0; orbit.enabled = true; el.zoom.textContent = '🔬 Zoom to molecules'; }
   state.rig = new c.Rig(); world.add(state.rig.group);
   if (state.rig.setOptions) state.rig.setOptions(state.opts);
   el.speed.innerHTML = ''; (c.speeds || SPEEDS).forEach((v) => el.speed.add(new Option(speedName(v), v)));
-  state.speed = c.speed || 1; el.speed.value = state.speed;
+  if (!keep) state.speed = c.speed || 1;
+  el.speed.value = state.speed;
   el.autoWrap.hidden = !!c.noSweep; el.zoom.hidden = !!c.noZoom; el.heatScale.hidden = !c.thermal || !state.opts.heat;
   el.microTitle.textContent = c.microTitle || 'Zoomed in on the contact';
   el.note.textContent = c.note || NOTE;
   document.querySelectorAll('[data-rig]').forEach((e) => { e.hidden = e.dataset.rig !== id; });
-  state.lanes = c.presets[0].lanes.map((l) => [...l]); state.wet = false; el.wet.checked = false; state.control = c.control0 || 0;
+  if (!keep) { state.lanes = c.presets[0].lanes.map((l) => [...l]); state.wet = false; el.wet.checked = false; state.control = c.control0 || 0; }
   [...el.tabs.children].forEach((b) => b.setAttribute('aria-selected', b.dataset.id === id));
   el.blurb.textContent = c.blurb; el.controlName.textContent = c.control; el.autoName.textContent = c.auto; el.wetWrap.hidden = !c.wet;
   el.presets.innerHTML = '';
@@ -183,10 +185,12 @@ function switchRig(id) {
     el.presets.appendChild(b);
   });
   buildLanes(); applyPairs();
-  camera.position.set(...c.camera); orbit.target.set(...c.target);
-  if (c.fitWidth) {   // on a narrow screen, step back far enough to keep both lanes in view
-    const need = c.fitWidth / (2 * Math.tan(camera.fov * Math.PI / 360) * camera.aspect), off = camera.position.clone().sub(orbit.target);
-    if (off.length() < need) camera.position.copy(orbit.target).add(off.setLength(Math.min(15.5, need)));
+  if (!keep) {
+    camera.position.set(...c.camera); orbit.target.set(...c.target);
+    if (c.fitWidth) {   // on a narrow screen, step back far enough to keep both lanes in view
+      const need = c.fitWidth / (2 * Math.tan(camera.fov * Math.PI / 360) * camera.aspect), off = camera.position.clone().sub(orbit.target);
+      if (off.length() < need) camera.position.copy(orbit.target).add(off.setLength(Math.min(15.5, need)));
+    }
   }
   orbit.update();
   if (state.zoomed) markHome();
@@ -298,6 +302,29 @@ function frame(now) {
   advance(dt);
   requestAnimationFrame(frame);
 }
+// ---- look (Professional / Playful) -----------------------------------------------------------
+// Each look is one stylesheet. The drawings (3D labels, chart, small panels) take their colours and fonts from it too,
+// so after a switch they are rebuilt once the stylesheet and its fonts have arrived.
+const LOOKS = { professional: 'css/style.css', playful: 'css/playful.css' };
+const within = (promise, ms) => Promise.race([promise, new Promise((r) => setTimeout(r, ms))]);
+const sheetLoaded = () => new Promise((r) => el.lookSheet.addEventListener('load', r, { once: true }));
+async function lookReady() {
+  if (!el.lookSheet.sheet) await within(sheetLoaded(), 3000);
+  syncLook();
+  await within(Promise.all([document.fonts.load('bold 72px ' + LOOK.display), document.fonts.load(LOOK.weight + ' 11px ' + LOOK.font)]).catch(() => {}), 2000);
+  applyTheme();
+}
+async function setLook(look) {
+  if (!LOOKS[look] || document.documentElement.dataset.look === look) return;
+  document.documentElement.dataset.look = look; el.look.value = look;
+  try { localStorage.setItem('look', look); } catch (e) { /* storage blocked: the choice lasts until the page is closed */ }
+  const loaded = sheetLoaded(); el.lookSheet.href = LOOKS[look]; await within(loaded, 3000);
+  await lookReady(); switchRig(state.rigId, true); resize();
+}
+el.look.value = document.documentElement.dataset.look || 'professional';
+el.look.addEventListener('change', () => setLook(el.look.value));
+
+await lookReady();
 switchRig('tilt'); resize();
 requestAnimationFrame(frame);
-window.lab = { state, RIGS, mol, zoom, toggleZoom, advance };   // handy for debugging in the console
+window.lab = { state, RIGS, mol, zoom, toggleZoom, advance, setLook };   // handy for debugging in the console

@@ -1,4 +1,4 @@
-import { LANE_COLORS } from '../rigs/common.js';
+import { LANE_COLORS, LOOK } from '../rigs/common.js';
 
 export function fitCanvas(canvas) {
   const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
@@ -15,7 +15,7 @@ export function drawChart(canvas, tr) {
   let yMax = tr.yMax; const yMin = tr.yMin || 0;
   if (tr.yMax !== 100) { let m = 0.5; for (const s of tr.series) for (const p of s) if (p.y > m) m = p.y; yMax = Math.ceil(m * 1.15 * 2) / 2; }
   const ink = cssVar('--muted'), line = cssVar('--line');
-  g.font = '700 11px Nunito, Helvetica, Arial, sans-serif'; g.fillStyle = ink; g.strokeStyle = line; g.lineWidth = 1;
+  g.font = LOOK.weight + ' 11px ' + LOOK.font; g.fillStyle = ink; g.strokeStyle = line; g.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
     const y = T + ph * (1 - i / 4);
     g.beginPath(); g.moveTo(L, y); g.lineTo(L + pw, y); g.stroke();

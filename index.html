@@ -4,10 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Material Interaction Lab</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css" id="lookSheet">
+<script>
+// Two looks, one stylesheet each: css/style.css (Professional, the default) and css/playful.css.
+// Use the one the visitor chose last time, before anything is drawn.
+(function () {
+  var look = 'professional'; try { if (localStorage.getItem('look') === 'playful') look = 'playful'; } catch (e) { /* storage blocked: keep the default */ }
+  document.documentElement.dataset.look = look;
+  if (look === 'playful') document.getElementById('lookSheet').href = 'css/playful.css';
+})();
+</script>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -18,7 +24,12 @@
 <body>
 <header>
   <div class="brand"><h1>Material Interaction Lab</h1><p id="blurb"></p></div>
-  <nav id="tabs" aria-label="Experiments"></nav>
+  <div id="headRight">
+    <nav id="tabs" aria-label="Experiments"></nav>
+    <label id="lookWrap" title="How the page looks. The experiments and their results are the same in both.">Look
+      <select id="look"><option value="professional">Professional</option><option value="playful">Playful</option></select>
+    </label>
+  </div>
 </header>
 <main>
   <aside id="left">
@@ -86,11 +97,11 @@ async function refresh(url) {            // walk the scripts this site imports f
   await Promise.all(deps.map(refresh));
 }
 try {
-  const page = location.href.split('#')[0], css = document.querySelector('link[rel=stylesheet]');
-  const [pageChanged, cssChanged] = await Promise.all([changed(page), changed(css.href), refresh(new URL('js/main.js', page).href)]);
+  const page = location.href.split('#')[0], sheet = document.getElementById('lookSheet'), sheets = ['css/style.css', 'css/playful.css'].map((u) => new URL(u, page).href);
+  const [pageChanged, , ...cssChanged] = await Promise.all([changed(page), refresh(new URL('js/main.js', page).href), ...sheets.map(changed)]);
   const last = +sessionStorage.getItem('reloaded') || 0;
   if (pageChanged && Date.now() - last > 10000) { sessionStorage.setItem('reloaded', Date.now()); location.reload(); await new Promise(() => {}); }
-  if (cssChanged) css.href = css.href;   // re-read the stylesheet now that the browser's copy is current
+  if (cssChanged[sheets.indexOf(sheet.href)]) sheet.href = sheet.href;   // re-read the stylesheet in use now that the browser's copy is current
 } catch (e) { /* offline or blocked: start with whatever the browser has */ }
 import('./js/main.js');
 </script>
