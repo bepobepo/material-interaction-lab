@@ -38,7 +38,7 @@ export const CONTAINERS = {
   paper:     { name: 'Paper plate',    noun: 'plate', shape: 'plate', col: '#ece2cc', detail: 'pleat', loss: 0.004, pen: 2,    rc: 2.0e5,  k: 0.08 },
 };
 
-CONTAINERS.plate = { name: 'Porcelain plate', noun: 'plate', shape: 'plate', col: '#f3f1ea', loss: 0.006, pen: 1, rc: 1.45e6, k: 1.5 };
+CONTAINERS.plate = { name: 'Porcelain plate', noun: 'plate', shape: 'plate', col: '#f3f1ea', loss: 0.006, pen: 1, rc: 2.4e6, k: 1.5 };     // a plate is about as thick as modelled, so its real heat capacity
 
 export const STARTS = {
   frozen: { name: 'Frozen (−18 °C)', T: -18 },
