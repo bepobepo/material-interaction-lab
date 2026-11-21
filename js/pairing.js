@@ -4,8 +4,10 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 // --- substance on a solid surface (tilt + pull rigs) -------------------------------------------
 export function wetInteract(sub, solid) {
-  // Contact angle: how strongly the surface attracts the liquid vs the liquid attracting itself.
-  const cos0 = clamp(2 * Math.sqrt(solid.surfaceEnergy / sub.surfaceTension) - 1, -1, 1);
+  // Contact angle: how strongly the surface attracts the liquid vs the liquid attracting itself (Owens–Wendt).
+  // Polar attraction only works polar-to-polar, which is why water (mostly polar) beads on Teflon while oil does not.
+  const gl = sub.surfaceTension, gs = solid.surfaceEnergy, lp = sub.polar * gl, sp = solid.polar * gs;
+  const cos0 = clamp(2 * (Math.sqrt((gs - sp) * (gl - lp)) + Math.sqrt(sp * lp)) / gl - 1, -1, 1);
   const cos = clamp(cos0 * (1 + 0.4 * solid.roughness), -1, 1);   // roughness amplifies wetting
   const contactAngle = Math.acos(cos) * 180 / Math.PI;
   const wetting = (1 + cos) / 2;                                   // 0 beads up … 1 spreads flat

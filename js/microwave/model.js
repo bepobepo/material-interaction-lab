@@ -6,13 +6,15 @@ import { CONTAINERS, PIZZA } from './data.js';
 export const DX = 0.005, NX = 36, NZ = 20, HALF = NX * DX / 2;
 export const BOWL = { R: 0.08, h: 0.06, t: 0.0075 }, PLATE = { R: 0.085, t: 0.005 };
 export const POWER = 800, PERIOD = 20, OMEGA = 2 * Math.PI / 10;     // W, s per on/off cycle, turntable rad/s
+const TABLE = { k: 1.1, half: 0.003, cap: 2.1e6 * 0.006 };           // the glass turntable: W/m·K, half its thickness (m), heat capacity per area (J/m²·K)
 const L0 = 1.2e-5, AIR = 22, HCONV = 12, LATENT = 334e3, V = DX * DX * DX;
 const KX = 2 * Math.PI / 0.07, KY = 2 * Math.PI / 0.08, KZ = 2 * Math.PI / 0.09;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 // Relative field strength at a point in the oven (x, y across, z up, metres from the turntable centre).
+// Up and down it is weakest right at the metal floor, where the waves cancel, and strongest about 2 cm above the turntable.
 export function fieldAt(x, y, z) {
-  return 0.25 + 0.75 * (0.5 + 0.5 * Math.cos(KX * x + 1.1)) * (0.5 + 0.5 * Math.cos(KY * y + 2.4)) * (0.65 + 0.35 * Math.cos(KZ * z + 0.6)) * 2.2;
+  return 0.25 + 0.75 * (0.5 + 0.5 * Math.cos(KX * x + 1.1)) * (0.5 + 0.5 * Math.cos(KY * y + 2.4)) * (0.65 + 0.35 * Math.cos(KZ * (z - 0.02))) * 2.2;
 }
 
 // Thermal-camera palette, sRGB 0..1.
@@ -173,6 +175,9 @@ export class HeatField {
       NB6.forEach((d, q) => { this.nb[i * 6 + q] = at(ix + d[0], iy + d[1], iz + d[2]); });
       NB26.forEach((d, q) => { this.nb26[i * 26 + q] = at(ix + d[0], iy + d[1], iz + d[2]); });
     }
+    // whatever rests on the turntable gives heat to (or takes it from) the glass underneath; the glass turns with the food
+    this.seat = new Int32Array(n).fill(-1); this.Tt = new Float32Array(NX * NX);
+    for (let i = 0; i < n; i++) if (list[i * 3 + 2] === 0) this.seat[i] = list[i * 3 + 1] * NX + list[i * 3];
     this.H = new Float64Array(n); this.T = new Float32Array(n); this.ice = new Float32Array(n); this.kc = new Float32Array(n);
     this.w = new Float32Array(n); this.dH = new Float64Array(n); this.tau = new Float32Array(n); this.inc = new Float32Array(n);
     // material numbers
@@ -185,6 +190,10 @@ export class HeatField {
     for (let i = 0; i < n; i++) if (this.kind[i] === 1 && Math.hypot(this.px[i] - p0.x, this.py[i] - p0.y) < DX * 1.5 && Math.abs(this.pz[i] - zMid) < DX * 1.1) this.mid.push(i);
     this.nFood = 0; for (let i = 0; i < n; i++) if (this.kind[i] === 1) this.nFood++;
     this.nCont = n - this.nFood;
+    // the lowest and highest thirds of the food, to tell whether its underside or its top is hotter
+    let zLo = 1, zHi = 0; for (let i = 0; i < n; i++) if (this.kind[i] === 1) { zLo = Math.min(zLo, this.pz[i]); zHi = Math.max(zHi, this.pz[i]); }
+    this.band = new Int8Array(n); this.tall = zHi - zLo + DX;
+    for (let i = 0; i < n; i++) if (this.kind[i] === 1) this.band[i] = this.pz[i] < zLo + (zHi - zLo) / 3 ? 1 : this.pz[i] > zHi - (zHi - zLo) / 3 ? 2 : 0;
     // 5 mm cells can't follow a shape exactly, so each food cell is made to count for a little more or less until they add up to the amount asked for
     this.fill = S.want ? clamp(S.want / (this.nFood * V), 0.7, 1.4) : 1; this.grams = this.nFood * V * this.fill * food.rho * 1000;
     this.rcT *= this.fill; this.rcF *= this.fill; this.lat *= this.fill;
@@ -195,7 +204,7 @@ export class HeatField {
     const T0 = this.start.T;
     for (let i = 0; i < this.n; i++) this.H[i] = this.kind[i] === 1 ? (T0 < 0 ? T0 * this.rcF : this.lat + T0 * this.rcT) : T0 * this.rcC;
     this.theta = 0; this.cosT = 1; this.sinT = 0; this.sinceTau = 1e9; this.steamRate = 0;
-    this.E = { food: 0, cont: 0, lost: 0, steam: 0, air: 0 };
+    this.E = { food: 0, cont: 0, lost: 0, steam: 0, air: 0, table: 0 }; this.Tt.fill(AIR);
     this.s = null; this.unpack(); this.stats(); this.unpack(); this.H0 = this.heat();
   }
 
@@ -232,7 +241,7 @@ export class HeatField {
   }
 
   step(dt, on, turning) {
-    const { n, T, kind, nb, kc, dH, w, px, py, pz, tau } = this, f = this.food, E = this.E;
+    const { n, T, kind, nb, kc, dH, w, px, py, pz, tau, seat, Tt } = this, f = this.food, E = this.E;
     if (turning) { this.theta += OMEGA * dt; this.cosT = Math.cos(this.theta); this.sinT = Math.sin(this.theta); }
     this.sinceTau += dt; if (this.sinceTau > 0.75) this.depth();
     dH.fill(0);
@@ -251,10 +260,15 @@ export class HeatField {
       const Ti = T[i], ki = kc[i]; let flow = 0;
       for (let d = 0; d < 6; d++) {
         const j = nb[i * 6 + d];
-        if (j >= 0) { const kj = kc[j]; flow += 2 * ki * kj / (ki + kj) * (T[j] - Ti); } else { const a = HCONV * DX * (AIR - Ti); flow += a; E.air -= a * kcond * V; }
+        if (j >= 0) { const kj = kc[j]; flow += 2 * ki * kj / (ki + kj) * (T[j] - Ti); }
+        else if (d === 5 && seat[i] >= 0) {     // underneath: the glass turntable
+          const c = seat[i], g = 1 / (DX / (2 * ki) + TABLE.half / TABLE.k), a = g * DX * (Tt[c] - Ti);
+          flow += a; Tt[c] -= g * (Tt[c] - Ti) * dt / TABLE.cap; E.table -= a * kcond * V;
+        } else { const a = HCONV * DX * (AIR - Ti); flow += a; E.air -= a * kcond * V; }
       }
       dH[i] += flow * kcond;
     }
+    for (let c = 0; c < Tt.length; c++) Tt[c] += (AIR - Tt[c]) * Math.min(1, HCONV * dt / TABLE.cap);     // the glass slowly gives its heat to the air
     let steam = 0;
     const cap = this.lat + f.boil * this.rcT;
     for (let i = 0; i < n; i++) { this.H[i] += dH[i]; if (kind[i] === 1 && this.H[i] > cap) { steam += (this.H[i] - cap) * V; this.H[i] = cap; } }
@@ -270,12 +284,12 @@ export class HeatField {
   }
 
   stats() {
-    const { n, T, kind, ice } = this; let fs = 0, hot = -1e9, cold = 1e9, fi = 0, cs = 0, ch = -1e9;
+    const { n, T, kind, ice, band } = this, bs = [0, 0, 0], bn = [0, 0, 0]; let fs = 0, hot = -1e9, cold = 1e9, fi = 0, cs = 0, ch = -1e9;
     for (let i = 0; i < n; i++) {
-      if (kind[i] === 1) { fs += T[i]; fi += ice[i]; if (T[i] > hot) hot = T[i]; if (T[i] < cold) cold = T[i]; } else { cs += T[i]; if (T[i] > ch) ch = T[i]; }
+      if (kind[i] === 1) { fs += T[i]; fi += ice[i]; bs[band[i]] += T[i]; bn[band[i]]++; if (T[i] > hot) hot = T[i]; if (T[i] < cold) cold = T[i]; } else { cs += T[i]; if (T[i] > ch) ch = T[i]; }
     }
     let mid = 0; for (const i of this.mid) mid += T[i]; mid = this.mid.length ? mid / this.mid.length : fs / this.nFood;
-    this.s = { avg: fs / this.nFood, hot, cold, mid, frozen: fi / this.nFood, contAvg: this.nCont ? cs / this.nCont : null, contHot: this.nCont ? ch : null };
+    this.s = { low: bn[1] ? bs[1] / bn[1] : fs / this.nFood, high: bn[2] ? bs[2] / bn[2] : fs / this.nFood, tall: this.tall, avg: fs / this.nFood, hot, cold, mid, frozen: fi / this.nFood, contAvg: this.nCont ? cs / this.nCont : null, contHot: this.nCont ? ch : null };
     return this.s;
   }
 
