@@ -1,7 +1,7 @@
 // Microwave heat model (no Three.js). One HeatField per lane: a grid of 5 mm cells holding the food and its container.
 // Each step: the oven's standing-wave pattern and the depth below the surface decide where the power lands,
 // then heat conducts between neighbouring cells, melts ice, and boils off as steam.
-import { CONTAINERS } from './data.js';
+import { CONTAINERS, PIZZA } from './data.js';
 
 export const DX = 0.005, NX = 36, NZ = 20, HALF = NX * DX / 2;
 export const BOWL = { R: 0.08, h: 0.06, t: 0.0075 }, PLATE = { R: 0.085, t: 0.005 };
@@ -25,32 +25,117 @@ export function thermal(T, out = [0, 0, 0]) {
 }
 export const thermalCSS = () => 'linear-gradient(90deg,' + STOPS.map((s) => `rgb(${s[1]},${s[2]},${s[3]}) ${((s[0] + 18) / 148 * 100).toFixed(1)}%`).join(',') + ')';
 
-// Shapes are round about the turntable axis: each is the space between bot(r) and top(r) out to rmax.
-export function shapes(food, cont) {
+// ---- shapes ----------------------------------------------------------------------------------
+// The container is round about the turntable axis: the space between bot(r) and top(r) out to rmax.
+// Food is one or more pieces. A piece has an outline seen from above (its radius R in each direction, about its own
+// centre) and, inside that, a bottom and a top height at each point (lx, ly; s is 0 at its centre and 1 at the outline).
+const TAU = Math.PI * 2, root = (v) => Math.sqrt(Math.max(0, v));
+const circle = (R) => ({ R: () => R });
+const oval = (a, b, wob) => ({ R: (p) => a * b / Math.hypot(b * Math.cos(p), a * Math.sin(p)) * (wob ? wob(p) : 1) });
+function poly(pts) {   // corners in counter-clockwise order around the centre
+  const n = pts.length, phis = [];
+  const R = (p) => {
+    const dx = Math.cos(p), dy = Math.sin(p);
+    for (let i = 0; i < n; i++) {
+      const a = pts[i], b = pts[(i + 1) % n], ex = b[0] - a[0], ey = b[1] - a[1], den = dx * ey - dy * ex; if (Math.abs(den) < 1e-12) continue;
+      const t = (a[0] * ey - a[1] * ex) / den, u = (a[0] * dy - a[1] * dx) / den; if (t > 0 && u >= -1e-6 && u <= 1 + 1e-6) return t;
+    }
+    return 0;
+  };
+  for (let i = 0; i < n; i++) {   // directions to draw it at: every corner, and a few along each edge
+    const a0 = Math.atan2(pts[i][1], pts[i][0]); let a1 = Math.atan2(pts[(i + 1) % n][1], pts[(i + 1) % n][0]); if (a1 <= a0) a1 += TAU;
+    for (let k = 0; k < 6; k++) phis.push(a0 + (a1 - a0) * k / 6);
+  }
+  phis.push(phis[0] + TAU);
+  return { R, phis };
+}
+// n alike pieces (half-length a, half-width b) arranged round the centre without overlapping, as far as lim allows
+function ring(n, a, b, lim) {
+  if (n === 1) return [{ x: 0, y: 0, rot: 0 }];
+  const d = Math.min(n === 2 ? b + 0.002 : n === 3 ? a * 0.98 : a * 1.09, Math.max(0.01, lim - b));
+  return Array.from({ length: n }, (_, k) => { const g = TAU * k / n + 0.5; return { x: d * Math.cos(g), y: d * Math.sin(g), rot: g + Math.PI / 2 }; });
+}
+// Each food shape: q is the size that is solved to match the amount (not used for foods counted in pieces).
+const PIECES = {
+  liquid: (q, e) => [{ x: 0, y: 0, rot: 0, out: circle(e.a), top: () => q, bot: () => -1 }],
+  mound: (q, e) => (e.bowl ? [{ x: 0, y: 0, rot: 0, out: circle(e.a), top: (x, y, s) => q + 0.018 * (1 - s * s), bot: () => -1 }]
+    : [{ x: 0, y: 0, rot: 0, out: circle(q), top: (x, y, s) => e.heap * q * root(1 - s * s), bot: () => 0 }]),
+  slab: (q) => { const h = Math.min(q, 0.12) / 2, tall = 0.04 * Math.max(1, q / 0.12) ** 2; return [{ x: 0, y: 0, rot: 0, out: poly([[h, -h], [h, h], [-h, h], [-h, -h]]), top: () => tall, bot: () => 0 }]; },
+  roll: (q, e) => ring(e.n, 0.044, 0.035, e.lim).map((p) => ({ ...p, rigid: true, out: oval(0.044, 0.035, (a) => 1 + 0.05 * Math.cos(2 * a)),
+    top: (x, y, s) => 0.005 + 0.041 * Math.max(0, 1 - s * s) ** 0.42, bot: (x, y, s) => 0.005 * s ** 4 })),
+  potato: (q, e) => ring(e.n, 0.043, 0.031, e.lim).map((p) => ({ ...p, rigid: true, out: oval(0.043, 0.031, (a) => 1 + 0.06 * Math.sin(2 * a + 0.7) + 0.045 * Math.sin(3 * a + 2)),
+    top: (x, y, s) => 0.024 + 0.028 * (1 + 2.8 * x) * root(1 - s * s), bot: (x, y, s) => 0.024 * (1 - root(1 - s * s)) })),
+  egg: (q, e) => ring(e.n, 0.029, 0.0215, e.lim).map((p) => ({ ...p, rigid: true, out: oval(0.029, 0.0215, (a) => 1 + 0.22 * Math.cos(a) * Math.sin(a) ** 2),
+    top: (x, y, s) => 0.0204 + 0.0215 * (1 + 3.4 * x) * root(1 - s * s), bot: (x, y, s) => 0.0204 * (1 - root(1 - s * s)) })),
+  pizza: (q, e) => {
+    const { L, half, tip } = PIZZA, pts = [[-tip * L, 0]];
+    for (let k = 0; k <= 6; k++) { const a = -half + 2 * half * k / 6; pts.push([L * Math.cos(a) - tip * L, L * Math.sin(a)]); }
+    const slice = (x, y, rot) => ({ x, y, rot, rigid: true, out: poly(pts), bot: () => 0,
+      top: (lx, ly) => { const f = clamp((Math.hypot(lx + tip * L, ly) - (L - 0.02)) / 0.012, 0, 1); return 0.013 + 0.008 * f * f * (3 - 2 * f); } });    // thicker at the crust
+    if (e.n === 1) return [slice(0, 0, 0)];
+    return [half, Math.PI + half].map((ax, k) => slice((k ? L : -L) / 2 + tip * L * Math.cos(ax), tip * L * Math.sin(ax), ax));   // two slices, top to tail
+  },
+  chicken: (q, e) => {
+    const k = Math.cbrt(e.n / 0.5), bump = (u, v, r) => Math.exp(-(u * u + v * v) / (r * r));
+    return [{ x: 0, y: 0, rot: 0.35, rigid: true, out: oval(0.08 * k, 0.054 * k, (a) => 1 + 0.2 * Math.cos(a) * Math.sin(a) ** 2 + 0.04 * Math.sin(3 * a + 1)), bot: () => 0,
+      top: (x, y, s) => { const u = x / k, v = y / k, b = root(1 - s * s); return k * (0.062 * b ** 0.9 * (0.6 + 0.4 * bump(u - 0.02, v - 0.004, 0.035)) + 0.02 * Math.sqrt(b) * bump(u + 0.048, v + 0.022, 0.018)); } }];   // breast, and a drumstick
+  },
+};
+
+// The food pieces standing on whatever holds them up (sup: the height of the support at distance r from the axis).
+function region(pieces, sup, z0, rest) {
+  const CEIL = NZ * DX - 0.001;
+  for (const p of pieces) {
+    p.c = Math.cos(p.rot); p.s = Math.sin(p.rot); p.z = z0;
+    if (rest && p.rigid) {   // a firm piece in a bowl rests a little way up its curved inside
+      let lift = 0;
+      for (const s of [0.35, 0.7, 0.95]) for (let j = 0; j < 12; j++) {
+        const ph = TAU * j / 12, R = s * p.out.R(ph), lx = R * Math.cos(ph), ly = R * Math.sin(ph);
+        lift = Math.max(lift, sup(Math.hypot(p.x + lx * p.c - ly * p.s, p.y + lx * p.s + ly * p.c)) - z0 - p.bot(lx, ly, s));
+      }
+      p.z += Math.min(0.025, lift);
+    }
+  }
+  // The column of piece p above the point (X, Y), fixed in the food: o = [bottom, top]. True where there is food.
+  const col = (p, X, Y, o) => {
+    const dx = X - p.x, dy = Y - p.y, lx = dx * p.c + dy * p.s, ly = dy * p.c - dx * p.s, r = Math.hypot(lx, ly), R = p.out.R(Math.atan2(ly, lx)), s = Math.min(1, r / R);
+    const b = Math.max(p.z + p.bot(lx, ly, s), sup(Math.hypot(X, Y))), t = Math.min(CEIL, p.z + p.top(lx, ly, s));
+    o[0] = b; o[1] = Math.max(b, t); return r <= R && t - b > 1e-4;
+  };
+  return { pieces, col };
+}
+function volume(reg) {
+  const o = [0, 0], h = DX / 2; let v = 0;
+  for (let y = -HALF + h / 2; y < HALF; y += h) for (let x = -HALF + h / 2; x < HALF; x += h) for (const p of reg.pieces) if (reg.col(p, x, y, o)) v += o[1] - o[0];
+  return v * h * h;
+}
+
+export function shapes(food, cont, amount = food.amount) {
   const bowl = cont.shape === 'bowl', plate = cont.shape === 'plate', { R, h, t } = BOWL, a = R - t, c = h - t;
   const ell = (r, rr) => Math.sqrt(Math.max(0, 1 - (r / rr) ** 2));
   const outerBot = (r) => h - h * ell(r, R), cavBot = (r) => (r >= a ? h : t + c - c * ell(r, a));
   const C = bowl ? { rmax: R, bot: outerBot, top: cavBot } : plate ? { rmax: PLATE.R, bot: () => 0, top: () => PLATE.t } : null;
   const z0 = bowl ? t : plate ? PLATE.t : 0, sup = bowl ? cavBot : () => z0;
-  let F;
-  if (food.shape === 'liquid') F = { top: () => t + 0.033 };
-  else if (food.shape === 'mound') F = bowl ? { top: (r) => t + 0.03 + 0.018 * (1 - (r / a) ** 2) } : { rmax: 0.065, top: (r) => z0 + 0.045 * ell(r, 0.065) };
-  else if (food.shape === 'slab') F = bowl ? { top: () => t + 0.038 } : { rmax: 0.055, top: () => z0 + 0.04 };
-  else if (food.shape === 'spheroid') F = { rmax: 0.036, top: (r) => z0 + 0.03 + 0.03 * ell(r, 0.036), bot: (r) => z0 + 0.03 - 0.03 * ell(r, 0.036) };
-  else { const zb = z0 + (bowl ? 0.012 : 0); F = { rmax: 0.045, top: (r) => zb + 0.045 * ell(r, 0.045), bot: () => zb }; }
-  const own = F.bot || (() => z0), bot = (r) => Math.max(own(r), sup(r));
-  let rmax = 0; for (let r = 0; r <= (F.rmax || a) + 1e-9; r += 0.00025) if (F.top(r) - bot(r) > 1e-4) rmax = r;
-  return { cont: C, food: { rmax, bot, top: F.top } };
+  const env = { bowl, a, lim: bowl ? 0.93 * a : 1, n: amount, heap: food.heap || 0.7 };
+  const make = (q) => region(PIECES[food.shape](q, env), sup, z0, bowl);
+  const want = food.unit === 'ml' ? amount * 1e-6 : food.unit === 'g' ? amount / 1000 / food.rho : 0;
+  let q = 0;
+  if (want) {   // grow the shape until it holds the amount asked for
+    let lo = food.shape === 'slab' ? 0.02 : bowl ? -0.017 : 0.01, hi = food.shape === 'slab' ? 0.3 : bowl ? c - 0.001 : 0.088;
+    for (let k = 0; k < 18; k++) { q = (lo + hi) / 2; if (volume(make(q)) < want) lo = q; else hi = q; }
+  }
+  return { cont: C, food: make(q), want };
 }
 
 // The pair numbers the rig and the explainer share.
-export function heatInteract(food, cont0, start) {
+export function heatInteract(food, amt, cont0, start) {
   const swapped = food.shape === 'liquid' && cont0.shape !== 'bowl', cont = swapped ? CONTAINERS.glass : cont0;
   const freezes = food.freezes !== false && food.water > 0, frozen = freezes && start.T < 0;
   const low = (s) => s.charAt(0).toLowerCase() + s.slice(1);
   const where = cont.shape === 'none' ? 'on its own' : (cont.shape === 'plate' ? 'on a ' : 'in a ') + low(cont.name);
   return {
-    kind: 'heat', container: cont, swapped, start, freezes, frozen, where, title: `${frozen ? 'Frozen ' + low(food.name) : food.name} ${where}`,
+    kind: 'heat', container: cont, swapped, start, freezes, frozen, where, amount: amt.value, amountName: amt.name,
+    title: `${frozen ? 'Frozen ' + low(food.name) : food.name} (${amt.name}) ${where}`,
     loss: food.loss, lossStart: food.loss * (frozen ? food.iceLoss : 1), pen: food.pen, selfMix: food.mix > 1,
     contAbsorbs: (cont.loss || 0) >= 0.05, spread: food.k * food.mix,
   };
@@ -60,13 +145,19 @@ const NB6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]
 const NB26 = []; for (let c = -1; c <= 1; c++) for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) if (a || b || c) NB26.push([a, b, c, Math.hypot(a, b, c)]);
 
 export class HeatField {
-  constructor(food, cont, start) {
+  constructor(food, cont, start, amount) {
     this.food = food; this.cont = cont; this.start = start;
-    const S = shapes(food, cont), N = NX * NX * NZ, map = this.map = new Int32Array(N).fill(-1), list = [], kinds = [];
+    const S = this.shape = shapes(food, cont, amount), F = S.food, P = F.pieces.length, o = [0, 0];
+    const N = NX * NX * NZ, map = this.map = new Int32Array(N).fill(-1), list = [], kinds = [];
+    const lo = new Float32Array(NX * NX * P).fill(1), hi = new Float32Array(NX * NX * P); this.foodTop = 0;     // each piece's column above every grid square
+    for (let iy = 0; iy < NX; iy++) for (let ix = 0; ix < NX; ix++) F.pieces.forEach((p, k) => {
+      if (!F.col(p, (ix + 0.5) * DX - HALF, (iy + 0.5) * DX - HALF, o)) return;
+      const j = (iy * NX + ix) * P + k; lo[j] = o[0]; hi[j] = o[1]; this.foodTop = Math.max(this.foodTop, o[1]);
+    });
     for (let iz = 0; iz < NZ; iz++) for (let iy = 0; iy < NX; iy++) for (let ix = 0; ix < NX; ix++) {
       const x = (ix + 0.5) * DX - HALF, y = (iy + 0.5) * DX - HALF, z = (iz + 0.5) * DX, r = Math.hypot(x, y);
       const inC = S.cont && r <= S.cont.rmax && z >= S.cont.bot(r) && z <= S.cont.top(r);
-      const inF = !inC && r <= S.food.rmax && z >= S.food.bot(r) && z <= S.food.top(r);
+      let inF = false; if (!inC) for (let k = 0, j = (iy * NX + ix) * P; k < P; k++) if (z >= lo[j + k] && z <= hi[j + k]) inF = true;
       if (inC || inF) { map[(iz * NX + iy) * NX + ix] = kinds.length; list.push(ix, iy, iz); kinds.push(inF ? 1 : 2); }
     }
     const n = this.n = kinds.length;
@@ -87,11 +178,14 @@ export class HeatField {
     this.rcT = food.rho * food.c; this.rcF = this.rcT * (1 - 0.45 * food.water * fz); this.lat = LATENT * food.rho * food.water * fz;
     this.kT = food.k * food.mix; this.kF = food.k * (1 + 2.6 * food.water * fz);
     this.rcC = cont.rc || 1; this.kC = cont.k || 0; this.lossC = cont.loss || 0; this.penC = cont.pen || 1;
-    // the cells on the axis at mid height: "the middle"
-    const zMid = (S.food.bot(0) + S.food.top(0)) / 2; this.mid = [];
-    for (let i = 0; i < n; i++) if (this.kind[i] === 1 && Math.hypot(this.px[i], this.py[i]) < DX * 1.5 && Math.abs(this.pz[i] - zMid) < DX * 1.1) this.mid.push(i);
+    // "the middle": the cells at the centre of the first piece, half way up
+    const p0 = F.pieces[0]; F.col(p0, p0.x, p0.y, o); const zMid = (o[0] + o[1]) / 2; this.mid = [];
+    for (let i = 0; i < n; i++) if (this.kind[i] === 1 && Math.hypot(this.px[i] - p0.x, this.py[i] - p0.y) < DX * 1.5 && Math.abs(this.pz[i] - zMid) < DX * 1.1) this.mid.push(i);
     this.nFood = 0; for (let i = 0; i < n; i++) if (this.kind[i] === 1) this.nFood++;
-    this.nCont = n - this.nFood; this.foodTop = S.food.top(0);
+    this.nCont = n - this.nFood;
+    // 5 mm cells can't follow a shape exactly, so each food cell is made to count for a little more or less until they add up to the amount asked for
+    this.fill = S.want ? clamp(S.want / (this.nFood * V), 0.7, 1.4) : 1; this.grams = this.nFood * V * this.fill * food.rho * 1000;
+    this.rcT *= this.fill; this.rcF *= this.fill; this.lat *= this.fill;
     this.reset();
   }
 
@@ -143,7 +237,7 @@ export class HeatField {
     if (on) {
       const c = this.cosT, s = this.sinT; let sum = 0;
       for (let i = 0; i < n; i++) {
-        const a = kind[i] === 1 ? f.loss * this.factor(i) : this.lossC;
+        const a = kind[i] === 1 ? f.loss * this.fill * this.factor(i) : this.lossC;
         w[i] = a * fieldAt(px[i] * c - py[i] * s, px[i] * s + py[i] * c, pz[i]) * Math.exp(-tau[i]); sum += w[i];
       }
       const L = sum * V, P = POWER * L / (L + L0), q = sum > 0 ? P / L * dt : 0;     // J/m³ per unit weight

@@ -3,7 +3,7 @@
 // The heat model lives in ../microwave/model.js and the food textures in ../microwave/looks.js; this file draws them.
 import * as THREE from 'three';
 import { LANE_COLORS, makeLabel, disposeGroup } from './common.js';
-import { HeatField, shapes, thermal, fieldAt, DX, PERIOD } from '../microwave/model.js';
+import { HeatField, thermal, fieldAt, DX, PERIOD } from '../microwave/model.js';
 import { foodLook, containerDetail, EXTENT, TALL } from '../microwave/looks.js';
 
 const LANE_X = [-0.148, 0.148], CW = 0.26, CH = 0.16, CD = 0.26, T_LO = -20, T_HI = 130, LUT_N = 300, STEAM = 10, TAU = Math.PI * 2;
@@ -50,36 +50,89 @@ class Skin {
   }
 }
 
-// A round shape: the space between bot(r) and top(r) out to rmax. Returns the surfaces that turn with it and the flat
-// cut face that stays put. Scene axes: x across, y up, z towards the viewer. Model axes: x across, y = scene z, z up.
-function buildRegion(reg, kind, looks, lines) {
-  const { rmax, bot, top } = reg, cont = kind === 2, NR = 18, NP = 49, inset = (r) => Math.min(r, Math.max(0, rmax - 0.4 * DX));
-  const inside = (r, z) => { const b = bot(r), t = top(r); return cont || t - b < DX ? (b + t) / 2 : Math.min(t - 0.4 * DX, Math.max(b + 0.4 * DX, z)); };
-  const flatUV = cont ? (r, ph, y) => [ph / TAU * 8, (r + y) / 0.045] : (r, ph) => [0.5 + r * Math.cos(ph) / EXTENT, 0.5 + r * Math.sin(ph) / EXTENT];
-  const surf = new Skin(kind, true, looks.top), skins = [surf];
+// The container is round: the space between bot(r) and top(r) out to rmax. Returns the surface that turns with it and
+// the flat cut face that stays put. Scene axes: x across, y up, z towards the viewer. Model axes: x across, y = scene z, z up.
+function buildContainer(reg, look, lines) {
+  const { rmax, bot, top } = reg, NR = 18, NP = 49, inset = (r) => Math.min(r, Math.max(0, rmax - 0.4 * DX)), mid = (r) => (bot(r) + top(r)) / 2;
+  const uv = (r, ph, y) => [ph / TAU * 8, (r + y) / 0.045];
+  const surf = new Skin(2, true, look), face = new Skin(2, false, look); face.face = true;
   const ring = (zOf, s0, s1) => surf.grid(NR, NP, (u, v) => {
-    const r = u * rmax, ph = TAU * v, ri = inset(r), y = zOf(r), q = flatUV(r, ph, y);
-    return [r * Math.cos(ph), y, r * Math.sin(ph), ri * Math.cos(ph), ri * Math.sin(ph), inside(ri, y), s0 + (s1 - s0) * u, q[0], q[1]];
+    const r = u * rmax, ph = TAU * v, ri = inset(r), y = zOf(r), q = uv(r, ph, y);
+    return [r * Math.cos(ph), y, r * Math.sin(ph), ri * Math.cos(ph), ri * Math.sin(ph), mid(ri), s0 + (s1 - s0) * u, q[0], q[1]];
   });
-  ring(bot, 0.74, 0.9); ring(top, cont ? 0.86 : 1, cont ? 0.98 : 1);
-  if (top(rmax) - bot(rmax) > 1e-3) {                                 // upright side at the outer edge
-    const wall = cont ? surf : new Skin(kind, true, looks.side), wraps = Math.max(1, Math.round(TAU * rmax / EXTENT));
-    wall.grid(2, NP, (u, v) => {
-      const ph = TAU * v, ri = inset(rmax), y = bot(rmax) + u * (top(rmax) - bot(rmax)), q = cont ? flatUV(rmax, ph, y) : [v * wraps, y / TALL];
-      return [rmax * Math.cos(ph), y, rmax * Math.sin(ph), ri * Math.cos(ph), ri * Math.sin(ph), inside(ri, y), 0.88, q[0], q[1]];
-    });
-    if (!cont) skins.push(wall);
-  }
-  const face = new Skin(kind, false, looks.side); face.face = true; skins.push(face);
+  ring(bot, 0.74, 0.9); ring(top, 0.86, 0.98);
+  if (top(rmax) - bot(rmax) > 1e-3) surf.grid(2, NP, (u, v) => {                 // upright side at the outer edge
+    const ph = TAU * v, ri = inset(rmax), y = bot(rmax) + u * (top(rmax) - bot(rmax)), q = uv(rmax, ph, y);
+    return [rmax * Math.cos(ph), y, rmax * Math.sin(ph), ri * Math.cos(ph), ri * Math.sin(ph), mid(ri), 0.88, q[0], q[1]];
+  });
   face.grid(45, 9, (u, v) => {
     const x = (2 * u - 1) * rmax, r = Math.abs(x), b = bot(r), y = b + v * (top(r) - b), ri = inset(r);
-    return [x, y, 0, Math.sign(x) * ri, 0, inside(ri, y), 1, cont ? x / 0.045 : 0.5 + x / EXTENT, cont ? y / 0.045 : y / TALL];
+    return [x, y, 0, Math.sign(x) * ri, 0, mid(ri), 1, x / 0.045, y / 0.045];
   });
   const loop = [];
   for (let i = 0; i <= 44; i++) { const x = (2 * i / 44 - 1) * rmax; loop.push(new THREE.Vector3(x, bot(Math.abs(x)), 0.0004)); }
   for (let i = 44; i >= 0; i--) { const x = (2 * i / 44 - 1) * rmax; loop.push(new THREE.Vector3(x, top(Math.abs(x)), 0.0004)); }
   lines.push(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(loop), new THREE.LineBasicMaterial({ color: 0x0f172a, transparent: true, opacity: 0.7 })));
+  return [surf, face];
+}
+
+// One piece of food (see shapes() in the model): its top, its underside and, where it has one, its upright edge.
+function buildPiece(reg, p, looks) {
+  const phis = p.out.phis || Array.from({ length: 49 }, (_, i) => TAU * i / 48), NP = phis.length, NR = 14, o = [0, 0];
+  const at = (s, ph, f, shade, side) => {   // f: 0 underside .. 1 top
+    const R = p.out.R(ph), lx = s * R * Math.cos(ph), ly = s * R * Math.sin(ph), wx = lx * p.c - ly * p.s, wy = lx * p.s + ly * p.c;
+    reg.col(p, p.x + wx, p.y + wy, o); const y = o[0] + f * (o[1] - o[0]);
+    const k = Math.max(0, 1 - 0.5 * DX / Math.max(1e-6, s * R)), X = p.x + wx * k, Y = p.y + wy * k;       // show the temperature a little way in
+    reg.col(p, X, Y, o); const zi = o[1] - o[0] < DX ? (o[0] + o[1]) / 2 : Math.min(o[1] - 0.4 * DX, Math.max(o[0] + 0.4 * DX, y));
+    return [p.x + wx, y, p.y + wy, X, Y, zi, shade, side ? side : 0.5 + lx / EXTENT, side ? (y - p.z) / TALL : 0.5 + ly / EXTENT];
+  };
+  const surf = new Skin(1, true, looks.top), skins = [surf], phi = (v) => phis[Math.round(v * (NP - 1))];
+  surf.grid(NR, NP, (u, v) => at(Math.sin(u * Math.PI / 2), phi(v), 0, 0.74 + 0.16 * u));
+  surf.grid(NR, NP, (u, v) => { const s = Math.sin(u * Math.PI / 2); return at(s, phi(v), 1, 1 - 0.2 * s ** 3); });     // a little darker towards the edge, so round things look round
+  let tall = 0, round = 0; const arc = [0];
+  for (let j = 0; j < NP; j++) {
+    const R = p.out.R(phis[j]), x = R * Math.cos(phis[j]), y = R * Math.sin(phis[j]);
+    reg.col(p, p.x + x * p.c - y * p.s, p.y + x * p.s + y * p.c, o); tall = Math.max(tall, o[1] - o[0]);
+    if (j) { const R0 = p.out.R(phis[j - 1]); round += Math.hypot(x - R0 * Math.cos(phis[j - 1]), y - R0 * Math.sin(phis[j - 1])); arc.push(round); }
+  }
+  if (tall > 1e-3) { const wall = new Skin(1, true, looks.side); wall.grid(2, NP, (u, v) => at(1, phi(v), u, 0.88, arc[Math.round(v * (NP - 1))] / EXTENT + 0.01)); skins.push(wall); }
   return skins;
+}
+
+// Where the cut goes through a piece of food. The cut stays put while the food turns, so this is redrawn every frame.
+class CutFace extends Skin {
+  constructor(reg, p, look) {
+    super(1, false, look); this.face = true; this.reg = reg; this.p = p; this.NU = 41; this.NV = 7;
+    this.grid(this.NU, this.NV, () => [0, 0, 0, 0, 0, 0, 1, 0, 0]);
+  }
+  build() {
+    const m = super.build(); m.frustumCulled = false; this.posA = m.geometry.attributes.position; this.uvA = m.geometry.attributes.uv;
+    this.line = new THREE.Line(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array((2 * this.NU + 1) * 3), 3)), new THREE.LineBasicMaterial({ color: 0x0f172a, transparent: true, opacity: 0.7 }));
+    this.line.frustumCulled = false; return m;
+  }
+  paint(field, heat) {
+    const { reg, p, NU, NV, pts } = this, c = field.cosT, s = field.sinT, o = [0, 0], W = 0.092, N = 64, pos = this.posA.array, uv = this.uvA.array, ln = this.line.geometry.attributes.position;
+    const hit = (x) => reg.col(p, x * c, -x * s, o);          // the point at x along the cut, in the food's own frame
+    let xa = null, xb = null;
+    for (let i = 0; i <= N; i++) { const x = -W + 2 * W * i / N; if (hit(x)) { if (xa === null) xa = x; xb = x; } }
+    if (xa === null) { pos.fill(0); ln.array.fill(0); this.posA.needsUpdate = ln.needsUpdate = true; return; }
+    const edge = (inX, outX) => { for (let k = 0; k < 8; k++) { const m = (inX + outX) / 2; if (hit(m)) inX = m; else outX = m; } return inX; };
+    xa = edge(xa, xa - 2 * W / N); xb = edge(xb, xb + 2 * W / N);
+    const xc = p.x * c - p.y * s, half = (xb - xa) / 2, mid = (xa + xb) / 2, pad = Math.min(0.4 * DX, half);
+    for (let i = 0; i < NU; i++) {
+      const x = xa + (xb - xa) * i / (NU - 1), xi = mid + Math.max(-half + pad, Math.min(half - pad, x - mid)); hit(x); const b = o[0], t = o[1];
+      for (let j = 0; j < NV; j++) {
+        const k = j * NU + i, y = b + (t - b) * j / (NV - 1);
+        pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = 0;
+        pts[k * 3] = xi; pts[k * 3 + 1] = 0; pts[k * 3 + 2] = t - b < DX ? (b + t) / 2 : Math.min(t - 0.4 * DX, Math.max(b + 0.4 * DX, y));
+        uv[k * 2] = 0.5 + (x - xc) / EXTENT; uv[k * 2 + 1] = (y - p.z) / TALL;
+      }
+      ln.setXYZ(i, x, t, 0.0004); ln.setXYZ(2 * NU - 1 - i, x, b, 0.0004);
+    }
+    ln.setXYZ(2 * NU, ln.getX(0), ln.getY(0), 0.0004);
+    this.posA.needsUpdate = this.uvA.needsUpdate = ln.needsUpdate = true;
+    super.paint(field, heat);
+  }
 }
 
 // Marks painted on the container so you can see it turning: short ticks round the rim and one long stripe.
@@ -158,14 +211,15 @@ class Lane {
   }
   setPair(food, inter) {
     const cont = inter.container; this.cont = cont;
-    this.field = new HeatField(food, cont, inter.start); this.clear();
-    const S = shapes(food, cont), lines = [], L = foodLook(food.id), det = containerDetail(cont.detail);
+    this.field = new HeatField(food, cont, inter.start, inter.amount); this.clear();
+    const S = this.field.shape, lines = [], L = foodLook(food.id), det = containerDetail(cont.detail);
     // heat: the picture the heat colours are multiplied by · real: the picture shown in real colours
     const pic = (p) => ({ heat: this.texture(p.canvas, false), real: this.texture(p.colour, true), gain: p.gain });
     const detTex = det && this.texture(det, false), plain = { heat: detTex || null, real: detTex || null, gain: 1, col: linear(cont.col || '#ffffff') };
-    if (S.cont) this.skins.push(...buildRegion(S.cont, 2, { top: plain, side: plain }, lines));
-    this.skins.push(...buildRegion(S.food, 1, { top: pic(L.top), side: pic(L.side) }, lines));
-    for (const s of this.skins) (s.face ? this.cutG : this.body).add(s.build());
+    if (S.cont) this.skins.push(...buildContainer(S.cont, plain, lines));
+    const looks = { top: pic(L.top), side: pic(L.side) };
+    for (const p of S.food.pieces) { const face = new CutFace(S.food, p, looks.side); this.skins.push(...buildPiece(S.food, p, looks), face); }
+    for (const s of this.skins) { (s.face ? this.cutG : this.body).add(s.build()); if (s.line) lines.push(s.line); }
     lines.forEach((l) => this.cutG.add(l));
     if (S.cont) { const R = S.cont.rmax, bowl = cont.shape === 'bowl'; this.marks = bowl ? rimMarks(S.cont, 0.985 * R, 0.9 * R, 0.82 * R) : rimMarks(S.cont, R, 0.9 * R, 0.76 * R); this.marks.forEach((m) => this.body.add(m)); }
     this.setView(this.view);

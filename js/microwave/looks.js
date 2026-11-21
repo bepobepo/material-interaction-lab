@@ -1,7 +1,9 @@
-// What each food looks like. Every food gets two small pictures: its top surface seen from above (256 px = EXTENT metres)
-// and its inside seen from the side (256 x 128 px = EXTENT x TALL metres). Each comes in two versions: real colours, and a
+// What each food looks like. Every food gets two small pictures: its top surface seen from above (256 px = EXTENT metres,
+// centred on the piece) and its inside seen from the side (256 x 128 px = EXTENT x TALL metres, from its base up). Each comes in two versions: real colours, and a
 // grey "detail" version that the heat colours are multiplied by, so soup, rice and lasagne still look different when
 // they are coloured by temperature.
+import { PIZZA } from './data.js';
+
 export const EXTENT = 0.18, TALL = 0.07;
 const W = 256, H = 128;
 
@@ -53,6 +55,34 @@ const PAINT = {
   },
   breadSide(g, R) { base(g, '#f0e0bb'); scatter(g, R, 95, 8, 5, ['#cdb27c', '#bfa46e'], { vary: 0.7 }); },
   oil(g, R) { base(g, '#f0cf45'); waves(g, R, 2, '#fff6c2', 11, 0.5); },
+  pasta(g, R) {     // strands of pasta with meat sauce on top in the middle
+    base(g, '#c99a3c'); waves(g, R, 26, '#f3d98a', 6, 0.95); waves(g, R, 14, '#e2bd62', 5, 0.9);
+    const gr = g.createRadialGradient(128, 128, 20, 128, 128, 92); gr.addColorStop(0, '#8f2f17'); gr.addColorStop(0.75, '#a03a1c'); gr.addColorStop(1, 'rgba(160,58,28,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 256, 256);
+    g.save(); g.beginPath(); g.arc(128, 128, 74, 0, Math.PI * 2); g.clip(); scatter(g, R, 150, 5, 4, ['#5e2413', '#74301a', '#c4532a'], { vary: 0.5 }); scatter(g, R, 30, 4, 1.8, '#3f6a2a'); g.restore();
+  },
+  pastaSide(g, R) { base(g, '#b9552a'); waves(g, R, 16, '#f3d98a', 6, 0.95); scatter(g, R, 70, 4, 3, ['#5e2413', '#74301a'], { vary: 0.5 }); },
+  pizza(g, R) {     // drawn to match the slice's outline: tip on the left, crust on the right
+    const px = 256 / EXTENT, tx = 128 - PIZZA.tip * PIZZA.L * px, L = PIZZA.L * px, a = PIZZA.half + 0.2;
+    const wedge = (r, col) => { g.fillStyle = col; g.beginPath(); g.moveTo(tx, 128); g.arc(tx, 128, r, -a, a); g.fill(); };
+    base(g, '#c58a45'); scatter(g, R, 60, 6, 4, '#a96f30', { alpha: 0.5 });
+    wedge(L - 0.017 * px, '#b53a1d'); wedge(L - 0.022 * px, '#f0c75c');
+    g.save(); g.beginPath(); g.moveTo(tx, 128); g.arc(tx, 128, L - 0.024 * px, -a, a); g.clip();
+    scatter(g, R, 40, 13, 8, '#f7dc8e', { alpha: 0.6, vary: 0.5 }); scatter(g, R, 26, 7, 5, '#d99a3a', { alpha: 0.7, vary: 0.5 });
+    for (const [d, t] of [[0.36, 0], [0.6, -0.2], [0.62, 0.22], [0.8, 0.02]]) { g.fillStyle = '#9c2418'; g.strokeStyle = '#6f150d'; g.lineWidth = 2; g.beginPath(); g.arc(tx + d * L * Math.cos(t), 128 + d * L * Math.sin(t), 11, 0, Math.PI * 2); g.fill(); g.stroke(); }
+    scatter(g, R, 70, 3.5, 1.5, '#3f6a2a'); g.restore();
+  },
+  pizzaSide(g, R) { base(g, '#e6c88f'); scatter(g, R, 120, 5, 3, ['#c9a566', '#bb9658'], { vary: 0.6 }); g.fillStyle = '#b53a1d'; g.fillRect(0, 102, 256, 5); g.fillStyle = '#f0c75c'; g.fillRect(0, 98, 256, 5); },
+  egg(g) { base(g, '#f6f1e6'); },
+  eggSide(g) {      // the yolk, in the middle of the egg
+    base(g, '#f6f1e6'); g.fillStyle = '#eda91f'; g.strokeStyle = '#c98510'; g.lineWidth = 2;
+    g.beginPath(); g.ellipse(128, 128 - 0.0204 / TALL * 128, 0.0125 / EXTENT * 256, 0.0125 / TALL * 128, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+  },
+  chicken(g, R) {   // roasted skin
+    base(g, '#b8702a'); scatter(g, R, 16, 40, 26, '#d49645', { alpha: 0.55 }); scatter(g, R, 22, 16, 10, ['#8a4a17', '#7a3d12'], { alpha: 0.6, vary: 0.6 });
+    scatter(g, R, 160, 2, 1.6, '#6b3410', { alpha: 0.6 }); scatter(g, R, 40, 3, 1.4, '#3f5a24');
+  },
+  chickenSide(g, R) { base(g, '#ecdcc3'); waves(g, R, 14, '#cdb38f', 3, 0.8); scatter(g, R, 10, 30, 12, '#dcc6a4', { alpha: 0.6 }); },
   honey(g, R) { base(g, '#d4860f'); waves(g, R, 5, '#f6bd4a', 8, 0.6); waves(g, R, 4, '#9c5a06', 5, 0.55); },
 };
 

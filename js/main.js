@@ -9,7 +9,7 @@ import { DragRig } from './rigs/drag.js';
 import { drawChart, cssVar } from './ui/chart.js';
 import { drawMicro } from './ui/microview.js';
 import { MicrowaveRig } from './rigs/microwave.js';
-import { FOODS, CONTAINERS, STARTS } from './microwave/data.js';
+import { FOODS, CONTAINERS, STARTS, amountSet } from './microwave/data.js';
 import { heatInteract, thermalCSS } from './microwave/model.js';
 import { MolecularView } from './molecular/view.js';
 import { molecularHTML } from './molecular/captions.js';
@@ -50,16 +50,19 @@ const RIGS = {
   },
   microwave: {
     tab: 'Microwave', Rig: MicrowaveRig, control: 'Cook time', control0: 110 / 290, noSweep: true, noZoom: true, thermal: true,
-    slots: [['Food', FOODS], ['Container', CONTAINERS], ['Starts', STARTS]], inter: heatInteract,
+    slots: [['Food', FOODS], ['Amount', (lane) => amountSet(FOODS[lane[0]])], ['Container', CONTAINERS], ['Starts', STARTS]], inter: heatInteract,
     speeds: [1, 2, 4, 8, 16, 32], speed: 8, maxStep: 0.25, microTitle: 'Where the microwave energy went', liveMicro: true,
     blurb: 'Heat food in a microwave and see where the heat goes: into the food, the bowl, or nowhere.',
-    note: 'A simplified model. The pattern of hot and cold spots is illustrative (every real oven has its own), shapes are round and centred, and food values are typical figures. It shows why food heats unevenly, not exact cooking times.',
+    note: 'A simplified model. The pattern of hot and cold spots is illustrative (every real oven has its own), shapes are simplified, and food values are typical figures. It shows why food heats unevenly, not exact cooking times.',
     camera: [0, 2.9, 6.7], target: [0, 0.5, 0], fitWidth: 6.3,
     presets: [
-      { name: 'Frozen soup: stoneware vs glass bowl', lanes: [['soup', 'stoneware', 'frozen'], ['soup', 'glass', 'frozen']] },
-      { name: 'Soup vs lasagne from the fridge', lanes: [['soup', 'glass', 'fridge'], ['lasagne', 'glass', 'fridge']] },
-      { name: 'Lasagne: frozen vs fridge-cold', lanes: [['lasagne', 'paper', 'frozen'], ['lasagne', 'paper', 'fridge']] },
-      { name: 'Water vs cooking oil', lanes: [['water', 'glass', 'room'], ['oil', 'glass', 'room']] },
+      { name: 'Frozen soup: stoneware vs glass bowl', lanes: [['soup', 300, 'stoneware', 'frozen'], ['soup', 300, 'glass', 'frozen']] },
+      { name: 'Soup vs lasagne from the fridge', lanes: [['soup', 300, 'glass', 'fridge'], ['lasagne', 400, 'paper', 'fridge']] },
+      { name: 'Lasagne: frozen vs fridge-cold', lanes: [['lasagne', 400, 'paper', 'frozen'], ['lasagne', 400, 'paper', 'fridge']] },
+      { name: 'Soup: a little vs a lot', lanes: [['soup', 150, 'glass', 'fridge'], ['soup', 450, 'glass', 'fridge']] },
+      { name: 'Bread rolls: one vs four', lanes: [['bread', 1, 'paper', 'room'], ['bread', 4, 'paper', 'room']] },
+      { name: 'Half a chicken vs a pizza slice', lanes: [['chicken', 0.5, 'porcelain', 'fridge'], ['pizza', 1, 'paper', 'fridge']] },
+      { name: 'Water vs cooking oil', lanes: [['water', 300, 'glass', 'room'], ['oil', 300, 'glass', 'room']] },
     ],
   },
 };
@@ -114,11 +117,12 @@ const state = { rigId: null, rig: null, lanes: [], inter: [], control: 0, playin
 const cfg = () => RIGS[state.rigId];
 const autoOn = () => state.auto && !cfg().noSweep;                                          // some rigs have nothing to sweep
 const slots = () => cfg().slots || [[cfg().aLabel, cfg().aSet], [cfg().bLabel, SOLIDS]];    // the pickers each lane has
-const pick = (i) => slots().map(([, set], k) => set[state.lanes[i][k]]);
+const setOf = (set, i) => (typeof set === 'function' ? set(state.lanes[i]) : set);                // some pickers depend on the lane's other choices
+const pick = (i) => slots().map(([, set], k) => setOf(set, i)[state.lanes[i][k]]);
 
 function computeInter(i) {
-  const [a, b, c] = pick(i);
-  state.inter[i] = cfg().inter ? cfg().inter(a, b, c) : state.rigId === 'drag' ? solidInteract(a, b, { wet: state.wet }) : wetInteract(a, b);
+  const [a, b] = pick(i);
+  state.inter[i] = cfg().inter ? cfg().inter(...pick(i)) : state.rigId === 'drag' ? solidInteract(a, b, { wet: state.wet }) : wetInteract(a, b);
   state.rig.setPair(i, a, b, state.inter[i]);
 }
 function setControl(v) {
@@ -140,12 +144,14 @@ function buildLanes() {
   [0, 1].forEach((i) => {
     const box = document.createElement('div'); box.className = 'lane' + (i ? ' b' : '');
     box.innerHTML = `<h2>${i ? 'B' : 'A'}</h2>`;
-    slots().forEach(([label, set], slot) => {
+    const linked = slots().some(([, set]) => typeof set === 'function');
+    slots().forEach(([label, set0], slot) => {
       const lab = document.createElement('label'); lab.textContent = label;
-      const sel = document.createElement('select');
+      const sel = document.createElement('select'), set = setOf(set0, i);
       for (const [id, m] of Object.entries(set)) sel.add(new Option(m.name, id));
+      if (!(state.lanes[i][slot] in set)) state.lanes[i][slot] = (Object.values(set).find((m) => m.preferred) || Object.values(set)[0]).id;   // e.g. a new food: its usual amount
       sel.value = state.lanes[i][slot];
-      sel.addEventListener('change', () => { state.lanes[i][slot] = sel.value; applyPairs(); });
+      sel.addEventListener('change', () => { state.lanes[i][slot] = sel.value; if (linked) buildLanes(); applyPairs(); });
       lab.appendChild(sel); box.appendChild(lab);
     });
     el.lanes.appendChild(box);
